@@ -75,6 +75,11 @@ struct Args {
     /// Plugin profiles base directory
     #[structopt(long, parse(from_os_str), default_value = &DEFAULT_PROFILE_DIR)]
     profile_dir: PathBuf,
+
+    /// Override `XDG_STATE_HOME` for a each profile. (state dir contains sessions data, various
+    /// plugins data, runtime data and more)
+    #[structopt(long)]
+    override_state: bool,
 }
 
 fn main() {
@@ -82,6 +87,19 @@ fn main() {
 
     let mut koala_env: Vec<(OsString, OsString)> = vec![];
     koala_env.push(("KOALA_KVIM_CONF".into(), args.cfg.into()));
+    koala_env.push((
+        "XDG_DATA_HOME".into(),
+        args.profile_dir.join(args.profile.clone()).into(),
+    ));
+
+    if args.override_state {
+        let state_dir = xdg::BaseDirectories::with_prefix("kvim")
+            .unwrap()
+            .get_state_home()
+            .join(Path::new(&args.profile));
+
+        koala_env.push(("XDG_STATE_HOME".into(), state_dir.into()));
+    }
 
     if args.debug {
         let mut debug_file = args.debug_dir.clone();
@@ -97,8 +115,7 @@ fn main() {
         fs::create_dir_all(args.debug_dir).expect("failed to create debug dir")
     }
 
-    println!("{:?}", koala_env);
-
+    // println!("{:?}", koala_env);
     let mut env = PopenConfig::current_env();
     env.append(&mut koala_env);
     // println!("{:?}", env);
