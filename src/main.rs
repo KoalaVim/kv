@@ -53,7 +53,7 @@ struct Args {
     debug: bool,
 
     /// Change output log for debug
-    #[structopt(parse(from_os_str), default_value = &DEFAULT_DEBUG_DIR)]
+    #[structopt(long, parse(from_os_str), default_value = &DEFAULT_DEBUG_DIR)]
     debug_dir: PathBuf,
 
     /// Override debug file name (default is timestamp)
@@ -61,11 +61,11 @@ struct Args {
     debug_file: Option<String>,
 
     /// Launch with given kvim.conf
-    #[structopt(parse(from_os_str), default_value = &DEFAULT_KVIM_CONF)]
+    #[structopt(short, long, parse(from_os_str), default_value = &DEFAULT_KVIM_CONF)]
     cfg: PathBuf,
 
     /// Launch with given lua cfg
-    #[structopt(parse(from_os_str), default_value = &DEFAULT_LUA_CONF)]
+    #[structopt(short, long, parse(from_os_str), default_value = &DEFAULT_LUA_CONF)]
     lua_cfg: PathBuf,
 
     /// Launch with given plugin proifle (creates new data dir at --profiles_dir)
@@ -73,7 +73,7 @@ struct Args {
     profile: String,
 
     /// Plugin profiles base directory
-    #[structopt(parse(from_os_str), default_value = &DEFAULT_PROFILE_DIR)]
+    #[structopt(long, parse(from_os_str), default_value = &DEFAULT_PROFILE_DIR)]
     profile_dir: PathBuf,
 }
 
@@ -81,6 +81,8 @@ fn main() {
     let args = Args::from_args();
 
     let mut koala_env: Vec<(OsString, OsString)> = vec![];
+    koala_env.push(("KOALA_KVIM_CONF".into(), args.cfg.into()));
+
     if args.debug {
         let mut debug_file = args.debug_dir.clone();
         if let Some(file_name) = args.debug_file {
