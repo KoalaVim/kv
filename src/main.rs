@@ -1,17 +1,18 @@
+use chrono::Local;
 use once_cell::sync::Lazy;
-use std::ffi::OsStr;
+use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::{env, ffi::OsString};
 use structopt::StructOpt;
-use subprocess::{Popen, PopenConfig, Redirection};
+use subprocess::{Popen, PopenConfig};
 
 static DEFAULT_DEBUG_DIR: Lazy<String> = Lazy::new(|| {
     format!(
         "{}/kvim",
-        env::var("HOME")
-            .as_deref()
-            .unwrap_or("FAILED_TO_GET_HOME_DIR"),
+        env::temp_dir()
+            .as_path()
+            .to_str()
+            .unwrap_or("FAILED_TO_GET_TMP_DIR")
     )
 });
 
@@ -51,9 +52,13 @@ struct Args {
     #[structopt(short, long)]
     debug: bool,
 
-    /// Launch with given kvim.conf
+    /// Change output log for debug
     #[structopt(parse(from_os_str), default_value = &DEFAULT_DEBUG_DIR)]
     debug_dir: PathBuf,
+
+    /// Override debug file name (default is timestamp)
+    #[structopt(long)]
+    debug_file: Option<String>,
 
     /// Launch with given kvim.conf
     #[structopt(parse(from_os_str), default_value = &DEFAULT_KVIM_CONF)]
@@ -64,7 +69,7 @@ struct Args {
     lua_cfg: PathBuf,
 
     /// Launch with given plugin proifle (creates new data dir at --profiles_dir)
-    #[structopt(short, long, default_value = "master")]
+    #[structopt(short, long, default_value = "upstream")]
     profile: String,
 
     /// Plugin profiles base directory
@@ -77,11 +82,20 @@ fn main() {
 
     let mut koala_env: Vec<(OsString, OsString)> = vec![];
     if args.debug {
-        koala_env.push(("KOALA_DEBUG".into(), "1".into()))
-        // TODO: add debug file
+        let mut debug_file = args.debug_dir.clone();
+        if let Some(file_name) = args.debug_file {
+            debug_file.push(file_name);
+        } else {
+            let now = Local::now();
+            debug_file.push(now.format("%Y-%m-%d_%H:%M:%S").to_string());
+        }
+
+        koala_env.push(("KOALA_DEBUG_OUT".into(), debug_file.into()));
+
+        fs::create_dir_all(args.debug_dir).expect("failed to create debug dir")
     }
 
-    // println!("{:?}", koala_env);
+    println!("{:?}", koala_env);
 
     let mut env = PopenConfig::current_env();
     env.append(&mut koala_env);
