@@ -1,7 +1,7 @@
 use chrono::Local;
 use once_cell::sync::Lazy;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{env, ffi::OsString};
 use structopt::StructOpt;
 use subprocess::{Popen, PopenConfig};
@@ -104,7 +104,15 @@ fn main() {
     // println!("{:?}", env);
 
     Popen::create(
-        &["nvim"],
+        &[
+            "nvim",
+            "-u",
+            args.lua_cfg
+                .join(Path::new("init.lua"))
+                .as_os_str()
+                .to_str()
+                .expect("failed to generete lua cfg path"),
+        ],
         PopenConfig {
             env: Some(env),
             ..Default::default()
