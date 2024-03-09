@@ -87,10 +87,9 @@ fn main() {
 
     let mut koala_env: Vec<(OsString, OsString)> = vec![];
     koala_env.push(("KOALA_KVIM_CONF".into(), args.cfg.into()));
-    koala_env.push((
-        "XDG_DATA_HOME".into(),
-        args.profile_dir.join(args.profile.clone()).into(),
-    ));
+
+    let data_dir = args.profile_dir.join(args.profile.clone());
+    koala_env.push(("XDG_DATA_HOME".into(), data_dir.clone().into()));
 
     if args.override_state {
         let state_dir = xdg::BaseDirectories::with_prefix("kvim")
@@ -130,10 +129,23 @@ fn main() {
             .into(),
     ];
 
-    run_kvim(env, params);
+    let restart_kvim_file_indicator = data_dir.join(Path::new("nvim/restart_kvim"));
+    // println!("{:?}", restart_kvim_file_indicator);
+
+    loop {
+        run_kvim(&env, &params);
+
+        if restart_kvim_file_indicator.exists() {
+            // re-run kvim if indicator exists
+            std::fs::remove_file(restart_kvim_file_indicator.clone())
+                .expect("failed to remove restart kvim file indicator");
+            continue;
+        }
+        break;
+    }
 }
 
-fn run_kvim(env: Vec<(OsString, OsString)>, params: Vec<OsString>) {
+fn run_kvim(env: &Vec<(OsString, OsString)>, params: &Vec<OsString>) {
     let mut p = params.clone();
     p.insert(0, "nvim".into());
 
@@ -141,7 +153,7 @@ fn run_kvim(env: Vec<(OsString, OsString)>, params: Vec<OsString>) {
     Popen::create(
         &p,
         PopenConfig {
-            env: Some(env),
+            env: Some(env.clone()),
             ..Default::default()
         },
     )
