@@ -120,16 +120,26 @@ fn main() {
     env.append(&mut koala_env);
     // println!("{:?}", env);
 
+    let params: Vec<OsString> = vec![
+        "-u".into(),
+        args.lua_cfg
+            .join(Path::new("init.lua"))
+            .as_os_str()
+            .to_str()
+            .expect("failed to generete lua cfg path")
+            .into(),
+    ];
+
+    run_kvim(env, params);
+}
+
+fn run_kvim(env: Vec<(OsString, OsString)>, params: Vec<OsString>) {
+    let mut p = params.clone();
+    p.insert(0, "nvim".into());
+
+    // println!("{:?}", p);
     Popen::create(
-        &[
-            "nvim",
-            "-u",
-            args.lua_cfg
-                .join(Path::new("init.lua"))
-                .as_os_str()
-                .to_str()
-                .expect("failed to generete lua cfg path"),
-        ],
+        &p,
         PopenConfig {
             env: Some(env),
             ..Default::default()
