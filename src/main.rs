@@ -132,16 +132,21 @@ fn main() {
     let restart_kvim_file_indicator = data_dir.join(Path::new("nvim/restart_kvim"));
     // println!("{:?}", restart_kvim_file_indicator);
 
-    loop {
-        run_kvim(&env, &params);
+    run_kvim(&env, &params);
 
-        if restart_kvim_file_indicator.exists() {
-            // re-run kvim if indicator exists
-            std::fs::remove_file(restart_kvim_file_indicator.clone())
-                .expect("failed to remove restart kvim file indicator");
-            continue;
+    // Push restart env value for the next run
+    env.push(("KOALA_RESTART".into(), "1".into()));
+    loop {
+        if !restart_kvim_file_indicator.exists() {
+            break; // stop running when restart indicator doesn't exist
         }
-        break;
+
+        // Remove indicator
+        std::fs::remove_file(restart_kvim_file_indicator.clone())
+            .expect("failed to remove restart kvim file indicator");
+
+        // Re-run kvim with KOALA_RESTART=1
+        run_kvim(&env, &params);
     }
 }
 
