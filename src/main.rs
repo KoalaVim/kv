@@ -48,6 +48,14 @@ static DEFAULT_PROFILE_DIR: Lazy<String> = Lazy::new(|| {
 #[derive(Debug, StructOpt)]
 #[structopt(name = "kv", about = "Launcher for KoalaVim (neovim configuration)")]
 struct Args {
+    /// Start KoalaVim in git mode
+    #[structopt(short, long)]
+    git: bool,
+
+    /// Start KoalaVim in git tree mode
+    #[structopt(short, long)]
+    tree: bool,
+
     /// Start KoalaVim in debug mode, output goes to --debug_dir/<time_stamp>
     #[structopt(short, long)]
     debug: bool,
@@ -116,6 +124,25 @@ fn main() {
         koala_env.push(("KOALA_DEBUG_OUT".into(), debug_file.into()));
 
         fs::create_dir_all(args.debug_dir).expect("failed to create debug dir")
+    }
+
+    let mut koala_mode: Option<&str> = None;
+    if args.git {
+        koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
+        koala_mode = Some("git");
+    }
+    if args.tree {
+        if koala_mode.is_some() {
+            eprintln!("Multiple koala modes is not supported");
+            return;
+        }
+
+        koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
+        koala_mode = Some("git_tree");
+    }
+
+    if let Some(koala_mode_ok) = koala_mode {
+        koala_env.push(("KOALA_MODE".into(), koala_mode_ok.into()));
     }
 
     // println!("{:?}", koala_env);
