@@ -80,6 +80,10 @@ struct Args {
     /// plugins data, runtime data and more)
     #[structopt(long)]
     override_state: bool,
+
+    /// Arguments to pass to nvim binary
+    #[structopt()]
+    nvim_args: Vec<OsString>,
 }
 
 fn main() {
@@ -119,7 +123,7 @@ fn main() {
     env.append(&mut koala_env);
     // println!("{:?}", env);
 
-    let params: Vec<OsString> = vec![
+    let mut params: Vec<OsString> = vec![
         "-u".into(),
         args.lua_cfg
             .join(Path::new("init.lua"))
@@ -128,6 +132,7 @@ fn main() {
             .expect("failed to generete lua cfg path")
             .into(),
     ];
+    params.append(&mut args.nvim_args.clone());
 
     let restart_kvim_file_indicator = data_dir.join(Path::new("nvim/restart_kvim"));
     // println!("{:?}", restart_kvim_file_indicator);
