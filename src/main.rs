@@ -89,7 +89,8 @@ struct Args {
     #[structopt(long)]
     override_state: bool,
 
-    /// Arguments to pass to nvim binary
+    /// Arguments to pass to nvim binary.
+    /// On mode (git/tree) arguments passed to KoalaVim.
     #[structopt()]
     nvim_args: Vec<OsString>,
 }
@@ -143,6 +144,15 @@ fn main() {
 
     if let Some(koala_mode_ok) = koala_mode {
         koala_env.push(("KOALA_MODE".into(), koala_mode_ok.into()));
+
+        koala_env.push((
+            "KOALA_ARGS".into(),
+            args.nvim_args
+                .iter()
+                .map(|arg| arg.clone().into_string().unwrap())
+                .collect::<String>()
+                .into(),
+        ));
     }
 
     // println!("{:?}", koala_env);
@@ -159,7 +169,10 @@ fn main() {
             .expect("failed to generete lua cfg path")
             .into(),
     ];
-    params.append(&mut args.nvim_args.clone());
+
+    if koala_mode.is_none() {
+        params.append(&mut args.nvim_args.clone());
+    }
 
     let restart_kvim_file_indicator = data_dir.join(Path::new("nvim/restart_kvim"));
     // println!("{:?}", restart_kvim_file_indicator);
