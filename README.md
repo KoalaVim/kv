@@ -15,7 +15,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 1. Make sure `~/.cargo/bin` is in your `PATH`.
 2. Install (fetch & build) the tool.
 ```bash
-CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --git=git@github.com/KoalaVim/kv.git
+CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --git=ssh://git@github.com/KoalaVim/kv.git
 ```
 
 ## Usage
