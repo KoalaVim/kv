@@ -160,15 +160,26 @@ fn main() {
     env.append(&mut koala_env);
     // println!("{:?}", env);
 
-    let mut params: Vec<OsString> = vec![
-        "-u".into(),
-        args.lua_cfg
-            .join(Path::new("init.lua"))
-            .as_os_str()
-            .to_str()
-            .expect("failed to generete lua cfg path")
-            .into(),
-    ];
+    let mut params: Vec<OsString> = if args.lua_cfg.is_dir() {
+        vec![
+            "-u".into(),
+            args.lua_cfg
+                .join(Path::new("init.lua"))
+                .as_os_str()
+                .to_str()
+                .expect("failed to generete lua cfg path")
+                .into(),
+        ]
+    } else {
+        vec![
+            "-u".into(),
+            args.lua_cfg
+                .as_os_str()
+                .to_str()
+                .expect("failed to generete lua cfg path")
+                .into(),
+        ]
+    };
 
     if koala_mode.is_none() {
         params.append(&mut args.nvim_args.clone());
