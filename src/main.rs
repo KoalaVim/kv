@@ -101,7 +101,15 @@ fn main() {
     let mut koala_env: Vec<(OsString, OsString)> = vec![];
     koala_env.push(("KOALA_KVIM_CONF".into(), args.cfg.into()));
 
-    let data_dir = args.profile_dir.join(args.profile.clone());
+    let mut profile_dir = args.profile_dir.clone();
+    if env::var("NVIM").is_ok() {
+        // When running kv inside a nvim instance the data dir is:
+        // `$XDG_DATA_HOME/kvim/upstream/kvim/` instead of `$XDG_DATA_HOME/kvim/`
+        profile_dir.pop();
+        profile_dir.pop();
+    }
+
+    let data_dir = profile_dir.join(args.profile.clone());
     koala_env.push(("XDG_DATA_HOME".into(), data_dir.clone().into()));
 
     if args.override_state {
