@@ -93,6 +93,10 @@ struct Args {
     /// On mode (git/tree) arguments passed to KoalaVim.
     #[structopt()]
     nvim_args: Vec<OsString>,
+
+    /// Override nvim's binary path
+    #[structopt(short, long, parse(from_os_str))]
+    nvim_bin_path: Option<PathBuf>,
 }
 
 fn main() {
@@ -193,6 +197,12 @@ fn main() {
         params.append(&mut args.nvim_args.clone());
     }
 
+    if let Some(bin_path) = args.nvim_bin_path {
+        params.insert(0, bin_path.into());
+    } else {
+        params.insert(0, "nvim".into());
+    }
+
     let restart_kvim_file_indicator = data_dir.join(Path::new("nvim/restart_kvim"));
     // println!("{:?}", restart_kvim_file_indicator);
 
@@ -215,12 +225,9 @@ fn main() {
 }
 
 fn run_kvim(env: &Vec<(OsString, OsString)>, params: &Vec<OsString>) {
-    let mut p = params.clone();
-    p.insert(0, "nvim".into());
-
     // println!("{:?}", p);
     Popen::create(
-        &p,
+        &params,
         PopenConfig {
             env: Some(env.clone()),
             ..Default::default()
