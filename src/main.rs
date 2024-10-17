@@ -76,7 +76,7 @@ struct Args {
     #[structopt(short, long, parse(from_os_str), default_value = &DEFAULT_LUA_CONF)]
     lua_cfg: PathBuf,
 
-    /// Launch with given plugin proifle (creates new data dir at --profiles_dir)
+    /// Launch with given plugin profile (creates new data dir at --profiles_dir)
     #[structopt(short, long, default_value = "upstream")]
     profile: String,
 
