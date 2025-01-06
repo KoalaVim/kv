@@ -25,16 +25,6 @@ static DEFAULT_KVIM_CONF: Lazy<String> = Lazy::new(|| {
     )
 });
 
-static DEFAULT_LUA_CONF: Lazy<String> = Lazy::new(|| {
-    xdg::BaseDirectories::with_prefix("nvim")
-        .unwrap()
-        .get_config_home()
-        .as_os_str()
-        .to_str()
-        .unwrap_or("FAILED_TO_GET_NVIM_CFG_DIR")
-        .to_string()
-});
-
 static DEFAULT_PROFILE_DIR: Lazy<String> = Lazy::new(|| {
     xdg::BaseDirectories::with_prefix("kvim")
         .unwrap()
@@ -73,8 +63,8 @@ struct Args {
     cfg: PathBuf,
 
     /// Launch with given lua cfg
-    #[structopt(short, long, parse(from_os_str), default_value = &DEFAULT_LUA_CONF)]
-    lua_cfg: PathBuf,
+    #[structopt(short, long, parse(from_os_str))]
+    lua_cfg: Option<PathBuf>,
 
     /// Launch with given plugin profile (creates new data dir at --profiles_dir)
     #[structopt(short, long, default_value = "upstream")]
@@ -167,32 +157,17 @@ fn main() {
         ));
     }
 
-    // println!("{:?}", koala_env);
+    // FIXME: add if lua_cfg passed
+    if let Some(lua_cfg) = args.lua_cfg {
+        koala_env.push(("XDG_CONFIG_HOME".into(), lua_cfg.into()));
+    }
+
+    println!("{:?}", koala_env);
     let mut env = PopenConfig::current_env();
     env.append(&mut koala_env);
     // println!("{:?}", env);
 
-    let mut params: Vec<OsString> = if args.lua_cfg.is_dir() {
-        vec![
-            "-u".into(),
-            args.lua_cfg
-                .join(Path::new("init.lua"))
-                .as_os_str()
-                .to_str()
-                .expect("failed to generete lua cfg path")
-                .into(),
-        ]
-    } else {
-        vec![
-            "-u".into(),
-            args.lua_cfg
-                .as_os_str()
-                .to_str()
-                .expect("failed to generete lua cfg path")
-                .into(),
-        ]
-    };
-
+    let mut params: Vec<OsString> = vec![];
     if koala_mode.is_none() {
         params.append(&mut args.nvim_args.clone());
     }
