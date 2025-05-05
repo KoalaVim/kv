@@ -162,7 +162,7 @@ fn main() {
         koala_env.push(("XDG_CONFIG_HOME".into(), lua_cfg.into()));
     }
 
-    println!("{:?}", koala_env);
+    // println!("{:?}", koala_env);
     let mut env = PopenConfig::current_env();
     env.append(&mut koala_env);
     // println!("{:?}", env);
