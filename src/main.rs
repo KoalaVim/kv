@@ -38,6 +38,10 @@ static DEFAULT_PROFILE_DIR: Lazy<String> = Lazy::new(|| {
 #[derive(Debug, StructOpt)]
 #[structopt(name = "kv", about = "Launcher for KoalaVim (neovim configuration)")]
 struct Args {
+    /// Verbose
+    #[structopt(short, long)]
+    verbose: bool,
+
     /// Start KoalaVim in git mode
     #[structopt(short, long)]
     git: bool,
@@ -157,19 +161,24 @@ fn main() {
         ));
     }
 
-    // FIXME: add if lua_cfg passed
-    if let Some(lua_cfg) = args.lua_cfg {
-        koala_env.push(("XDG_CONFIG_HOME".into(), lua_cfg.into()));
+    if args.verbose {
+        println!("Koala Env: {:?}", koala_env);
     }
-
-    // println!("{:?}", koala_env);
     let mut env = PopenConfig::current_env();
     env.append(&mut koala_env);
-    // println!("{:?}", env);
+
+    if args.verbose {
+        println!("Env: {:?}", env);
+    }
 
     let mut params: Vec<OsString> = vec![];
     if koala_mode.is_none() {
         params.append(&mut args.nvim_args.clone());
+    }
+
+    if let Some(lua_cfg) = args.lua_cfg {
+        let lua_cfg_params: Vec<OsString> = vec!["-l".into(), lua_cfg.into()];
+        params.append(&mut lua_cfg_params.clone());
     }
 
     if let Some(bin_path) = args.nvim_bin_path {
@@ -179,8 +188,13 @@ fn main() {
     }
 
     let restart_kvim_file_indicator = data_dir.join(Path::new("nvim/restart_kvim"));
-    // println!("{:?}", restart_kvim_file_indicator);
+    if args.verbose {
+        println!("Restart Indicator Path: {:?}", restart_kvim_file_indicator);
+    }
 
+    if args.verbose {
+        println!("Nvim Launch Params: {:?}", params);
+    }
     run_kvim(&env, &params);
 
     // Push restart env value for the next run
@@ -200,7 +214,6 @@ fn main() {
 }
 
 fn run_kvim(env: &Vec<(OsString, OsString)>, params: &Vec<OsString>) {
-    // println!("{:?}", p);
     Popen::create(
         &params,
         PopenConfig {
