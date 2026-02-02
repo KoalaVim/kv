@@ -54,6 +54,10 @@ struct Args {
     #[structopt(short, long)]
     debug: bool,
 
+    /// Disable noice. disables notifications, helpful for debugging messages
+    #[structopt(short, long)]
+    no_noice: bool,
+
     /// Change output log for debug
     #[structopt(long, parse(from_os_str), default_value = &DEFAULT_DEBUG_DIR)]
     debug_dir: PathBuf,
@@ -131,6 +135,10 @@ fn main() {
         koala_env.push(("KOALA_DEBUG_OUT".into(), debug_file.into()));
 
         fs::create_dir_all(args.debug_dir).expect("failed to create debug dir")
+    }
+
+    if args.no_noice {
+        koala_env.push(("KOALA_NO_NOICE".into(), "1".into()));
     }
 
     let mut koala_mode: Option<&str> = None;
