@@ -50,6 +50,10 @@ struct Args {
     #[structopt(short, long)]
     tree: bool,
 
+    /// Start KoalaVim in git diff mode
+    #[structopt(long)]
+    git_diff: bool,
+
     /// Start KoalaVim in debug mode, output goes to --debug_dir/<time_stamp>
     #[structopt(short, long)]
     debug: bool,
@@ -154,6 +158,15 @@ fn main() {
 
         koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
         koala_mode = Some("git_tree");
+    }
+    if args.git_diff {
+        if koala_mode.is_some() {
+            eprintln!("Multiple koala modes is not supported");
+            return;
+        }
+
+        koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
+        koala_mode = Some("git_diff");
     }
 
     if let Some(koala_mode_ok) = koala_mode {
