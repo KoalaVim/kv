@@ -67,7 +67,7 @@ fn main() -> Result<(), String> {
 
     // Compute restart indicator path via XDG data home + appname
     let data_dir = xdg_data_home().join(&appname);
-    let restart_kvim_file_indicator = data_dir.join("nvim/restart_kvim");
+    let restart_kvim_file_indicator = data_dir.join("restart_kvim");
 
     if cli.debug {
         let mut debug_file = cli.debug_dir.clone();
