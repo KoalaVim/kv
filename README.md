@@ -38,6 +38,15 @@ kv --ai            # ai mode
 
 Manage isolated KoalaVim environments with separate config, data, state, and cache directories (following XDG conventions).
 
+Each env uses `NVIM_APPNAME` set to `kvim-envs/<name>`, which makes Neovim resolve its directories under the XDG base paths:
+
+```
+~/.config/kvim-envs/<name>/     # config (init.lua, plugins, etc.)
+~/.local/share/kvim-envs/<name>/  # data (installed plugins, etc.)
+~/.local/state/kvim-envs/<name>/  # state (shada, logs, etc.)
+~/.cache/kvim-envs/<name>/      # cache (compiled bytecode, etc.)
+```
+
 ```bash
 # Create a new env
 kv env create my-env
