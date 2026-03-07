@@ -7,9 +7,10 @@ use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, EnvAction};
 use env::{cmd_env_init, format_size};
 use owo_colors::OwoColorize;
-use paths::{env_appname, env_cache_dir, env_config_dir, env_data_dir, env_state_dir, xdg_data_home};
+use paths::{env_all_dirs, env_appname, env_config_dir, xdg_data_home};
 use std::ffi::OsString;
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
@@ -31,87 +32,99 @@ fn tilde_shorten(path: &std::path::Path) -> String {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
-    // Handle subcommands
     if let Some(command) = &cli.command {
-        match command {
-            Commands::Init { env } => {
-                let name = env.as_deref().unwrap_or("main");
-                cmd_env_init(name)?;
-                return Ok(());
-            }
-            Commands::Completions { shell } => {
-                let mut buf = Vec::new();
-                clap_complete::generate(
-                    *shell,
-                    &mut Cli::command(),
-                    "kv",
-                    &mut buf,
-                );
-                // Strip the nvim_args positional from zsh completions so
-                // subcommands complete correctly (clap_complete limitation).
-                let output = String::from_utf8_lossy(&buf);
-                for line in output.lines() {
-                    if line.contains("nvim_args") {
-                        continue;
-                    }
-                    println!("{}", line);
+        return handle_subcommand(command);
+    }
+    launch_nvim(cli)
+}
+
+fn handle_subcommand(command: &Commands) -> Result<(), String> {
+    match command {
+        Commands::Init { env } => {
+            let name = env.as_deref().unwrap_or("main");
+            cmd_env_init(name)?;
+        }
+        Commands::Completions { shell } => {
+            let mut buf = Vec::new();
+            clap_complete::generate(
+                *shell,
+                &mut Cli::command(),
+                "kv",
+                &mut buf,
+            );
+            // Strip the nvim_args positional from zsh completions so
+            // subcommands complete correctly (clap_complete limitation).
+            let output = String::from_utf8_lossy(&buf);
+            for line in output.lines() {
+                if line.contains("nvim_args") {
+                    continue;
                 }
-                return Ok(());
-            }
-            Commands::Env { action } => {
-                match action {
-                    EnvAction::Create { name, from, branch } => {
-                        env::cmd_env_create(name, from.as_deref(), branch.as_deref())?;
-                    }
-                    EnvAction::Fork { source, name } => {
-                        env::cmd_env_fork(source, name)?;
-                    }
-                    EnvAction::List => {
-                        let mut envs = env::cmd_env_list();
-                        if envs.is_empty() {
-                            println!("No envs found.");
-                        } else {
-                            // Show default (main) env first
-                            if let Some(pos) = envs.iter().position(|e| e.name == "main") {
-                                envs.swap(0, pos);
-                            }
-                            for info in &envs {
-                                let default_marker = if info.name == "main" {
-                                    " (default)".dimmed().to_string()
-                                } else {
-                                    String::new()
-                                };
-                                println!(
-                                    "  {} [{}]{}",
-                                    info.name.cyan().bold(),
-                                    format_size(info.total_size),
-                                    default_marker
-                                );
-                                for (label, dir, size) in &info.dirs {
-                                    println!(
-                                        "    {}: {} ({})",
-                                        label.bold(),
-                                        tilde_shorten(dir).dimmed(),
-                                        format_size(*size)
-                                    );
-                                }
-                            }
-                            println!("\n{} env(s) found.", envs.len());
-                        }
-                    }
-                    EnvAction::Delete { name, force } => {
-                        env::cmd_env_delete(name, *force)?;
-                    }
-                    EnvAction::Rename { current, new_name } => {
-                        env::cmd_env_rename(current, new_name)?;
-                    }
-                }
+                println!("{}", line);
             }
         }
-        return Ok(());
+        Commands::Env { action } => {
+            handle_env_action(action)?;
+        }
     }
+    Ok(())
+}
 
-    // Determine NVIM_APPNAME
+fn handle_env_action(action: &EnvAction) -> Result<(), String> {
+    match action {
+        EnvAction::Create { name, from, branch } => {
+            env::cmd_env_create(name, from.as_deref(), branch.as_deref())?;
+        }
+        EnvAction::Fork { source, name } => {
+            env::cmd_env_fork(source, name)?;
+        }
+        EnvAction::List => {
+            print_env_list();
+        }
+        EnvAction::Delete { name, force } => {
+            env::cmd_env_delete(name, *force)?;
+        }
+        EnvAction::Rename { current, new_name } => {
+            env::cmd_env_rename(current, new_name)?;
+        }
+    }
+    Ok(())
+}
+
+fn print_env_list() {
+    let mut envs = env::cmd_env_list();
+    if envs.is_empty() {
+        println!("No envs found.");
+        return;
+    }
+    // Show default (main) env first
+    if let Some(pos) = envs.iter().position(|e| e.name == "main") {
+        envs.swap(0, pos);
+    }
+    for info in &envs {
+        let default_marker = if info.name == "main" {
+            " (default)".dimmed().to_string()
+        } else {
+            String::new()
+        };
+        println!(
+            "  {} [{}]{}",
+            info.name.cyan().bold(),
+            format_size(info.total_size),
+            default_marker
+        );
+        for (label, dir, size) in &info.dirs {
+            println!(
+                "    {}: {} ({})",
+                label.bold(),
+                tilde_shorten(dir).dimmed(),
+                format_size(*size)
+            );
+        }
+    }
+    println!("\n{} env(s) found.", envs.len());
+}
+
+fn resolve_env_name(cli: &Cli) -> Result<String, String> {
     let env_name = cli.env.as_deref().unwrap_or("main");
     env::validate_env_name(env_name).map_err(|e| format!("Invalid env name: {}", e))?;
     let config_dir = env_config_dir(env_name);
@@ -135,20 +148,36 @@ fn run(cli: Cli) -> Result<(), String> {
             std::process::exit(1);
         }
     }
-    let appname = env_appname(env_name);
+    Ok(env_name.to_string())
+}
 
-    let mut koala_env: Vec<(OsString, OsString)> = vec![
-        ("NVIM_APPNAME".into(), appname.clone().into()),
-        ("KOALA_KVIM_CONF".into(), cli.cfg.into()),
+fn resolve_koala_mode(cli: &Cli) -> Result<Option<&'static str>, String> {
+    let modes = [
+        (cli.git, "git"),
+        (cli.tree, "git_tree"),
+        (cli.git_diff, "git_diff"),
+        (cli.ai, "ai"),
     ];
+    let active: Vec<_> = modes.iter().filter(|(flag, _)| *flag).collect();
+    if active.len() > 1 {
+        return Err("Multiple koala modes is not supported".to_string());
+    }
+    Ok(active.first().map(|(_, name)| *name))
+}
 
-    // Compute restart indicator path via XDG data home + appname
-    let data_dir = xdg_data_home().join(&appname);
-    let restart_kvim_file_indicator = data_dir.join("restart_kvim");
+fn build_koala_env(
+    cli: &Cli,
+    appname: &str,
+    koala_mode: Option<&str>,
+) -> Result<Vec<(OsString, OsString)>, String> {
+    let mut koala_env: Vec<(OsString, OsString)> = vec![
+        ("NVIM_APPNAME".into(), appname.into()),
+        ("KOALA_KVIM_CONF".into(), cli.cfg.as_os_str().into()),
+    ];
 
     if cli.debug {
         let mut debug_file = cli.debug_dir.clone();
-        if let Some(file_name) = cli.debug_file {
+        if let Some(file_name) = &cli.debug_file {
             debug_file.push(file_name);
         } else {
             let now = Local::now();
@@ -165,18 +194,6 @@ fn run(cli: Cli) -> Result<(), String> {
         koala_env.push(("KOALA_NO_NOICE".into(), "1".into()));
     }
 
-    let modes = [
-        (cli.git, "git"),
-        (cli.tree, "git_tree"),
-        (cli.git_diff, "git_diff"),
-        (cli.ai, "ai"),
-    ];
-    let active: Vec<_> = modes.iter().filter(|(flag, _)| *flag).collect();
-    if active.len() > 1 {
-        return Err("Multiple koala modes is not supported".to_string());
-    }
-    let koala_mode = active.first().map(|(_, name)| *name);
-
     if koala_mode.is_some() {
         koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
     }
@@ -186,47 +203,71 @@ fn run(cli: Cli) -> Result<(), String> {
         koala_env.push(("KOALA_ARGS".into(), join_args(&cli.nvim_args)));
     }
 
-    if cli.verbose {
-        println!("NVIM_APPNAME: {}", appname);
-        println!("Env: {}", env_name);
-        println!("  config: {}", env_config_dir(env_name).display());
-        println!("  data:   {}", env_data_dir(env_name).display());
-        println!("  state:  {}", env_state_dir(env_name).display());
-        println!("  cache:  {}", env_cache_dir(env_name).display());
-        println!("Restart Indicator Path: {:?}", restart_kvim_file_indicator);
-        println!("Koala Env: {:?}", koala_env);
-    }
+    Ok(koala_env)
+}
 
+fn build_nvim_params(cli: &Cli, koala_mode: Option<&str>) -> Vec<OsString> {
     let mut params: Vec<OsString> = vec![];
+
+    let nvim_bin: OsString = cli
+        .nvim_bin_path
+        .as_ref()
+        .map(|p| p.as_os_str().into())
+        .unwrap_or_else(|| "nvim".into());
+    params.push(nvim_bin);
+
     if koala_mode.is_none() {
         params.extend(cli.nvim_args.iter().cloned());
     }
 
-    if let Some(lua_cfg) = cli.lua_cfg {
-        params.extend([OsString::from("-l"), lua_cfg.into()]);
+    if let Some(lua_cfg) = &cli.lua_cfg {
+        params.extend([OsString::from("-l"), lua_cfg.as_os_str().into()]);
     }
 
-    if let Some(bin_path) = cli.nvim_bin_path {
-        params.insert(0, bin_path.into());
-    } else {
-        params.insert(0, "nvim".into());
-    }
+    params
+}
+
+fn launch_nvim(cli: Cli) -> Result<(), String> {
+    let env_name = resolve_env_name(&cli)?;
+    let appname = env_appname(&env_name);
+    let koala_mode = resolve_koala_mode(&cli)?;
+    let mut koala_env = build_koala_env(&cli, &appname, koala_mode)?;
+    let params = build_nvim_params(&cli, koala_mode);
+
+    let restart_indicator = xdg_data_home().join(&appname).join("restart_kvim");
 
     if cli.verbose {
-        println!("Nvim Launch Params: {:?}", params);
+        print_verbose_info(&env_name, &appname, &restart_indicator, &koala_env, &params);
     }
 
     run_kvim(&koala_env, &params)?;
 
     // Push restart env value for subsequent runs
     koala_env.push(("KOALA_RESTART".into(), "1".into()));
-    while restart_kvim_file_indicator.exists() {
-        fs::remove_file(&restart_kvim_file_indicator)
+    while restart_indicator.exists() {
+        fs::remove_file(&restart_indicator)
             .map_err(|e| format!("Failed to remove restart indicator: {}", e))?;
         run_kvim(&koala_env, &params)?;
     }
 
     Ok(())
+}
+
+fn print_verbose_info(
+    env_name: &str,
+    appname: &str,
+    restart_indicator: &PathBuf,
+    koala_env: &[(OsString, OsString)],
+    params: &[OsString],
+) {
+    println!("NVIM_APPNAME: {}", appname);
+    println!("Env: {}", env_name);
+    for (label, dir) in &env_all_dirs(env_name) {
+        println!("  {}:  {}", label, dir.display());
+    }
+    println!("Restart Indicator Path: {:?}", restart_indicator);
+    println!("Koala Env: {:?}", koala_env);
+    println!("Nvim Launch Params: {:?}", params);
 }
 
 fn join_args(args: &[OsString]) -> OsString {
@@ -241,11 +282,15 @@ fn join_args(args: &[OsString]) -> OsString {
 }
 
 fn run_kvim(env: &[(OsString, OsString)], params: &[OsString]) -> Result<(), String> {
-    Command::new(&params[0])
+    let status = Command::new(&params[0])
         .args(&params[1..])
         .envs(env.iter().map(|(k, v)| (k, v)))
         .status()
         .map_err(|e| format!("Failed to launch nvim: {}", e))?;
+    if !status.success() {
+        let code = status.code().unwrap_or(1);
+        return Err(format!("nvim exited with code {}", code));
+    }
     Ok(())
 }
 

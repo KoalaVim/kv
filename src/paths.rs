@@ -48,6 +48,26 @@ pub fn env_cache_dir(name: &str) -> PathBuf {
     xdg_cache_home().join(ENV_PREFIX).join(name)
 }
 
+/// Returns all four XDG dirs (config, data, state, cache) for the given env.
+pub fn env_all_dirs(name: &str) -> [(&'static str, PathBuf); 4] {
+    [
+        ("config", env_config_dir(name)),
+        ("data", env_data_dir(name)),
+        ("state", env_state_dir(name)),
+        ("cache", env_cache_dir(name)),
+    ]
+}
+
+/// Returns all four XDG dir pairs (label, src, dst) for source and destination envs.
+pub fn env_all_dir_pairs(src_name: &str, dst_name: &str) -> [(&'static str, PathBuf, PathBuf); 4] {
+    [
+        ("config", env_config_dir(src_name), env_config_dir(dst_name)),
+        ("data", env_data_dir(src_name), env_data_dir(dst_name)),
+        ("state", env_state_dir(src_name), env_state_dir(dst_name)),
+        ("cache", env_cache_dir(src_name), env_cache_dir(dst_name)),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -167,14 +167,7 @@ pub fn cmd_env_fork(source: &str, name: &str) -> Result<PathBuf, String> {
         ));
     }
 
-    let dirs = [
-        ("config", env_config_dir(source), env_config_dir(name)),
-        ("data", env_data_dir(source), env_data_dir(name)),
-        ("state", env_state_dir(source), env_state_dir(name)),
-        ("cache", env_cache_dir(source), env_cache_dir(name)),
-    ];
-
-    for (label, src, dst) in &dirs {
+    for (label, src, dst) in &env_all_dir_pairs(source, name) {
         if src.exists() {
             copy_dir_recursive(src, dst)
                 .map_err(|e| format!("Failed to copy {} dir: {}", label, e))?;
@@ -284,13 +277,7 @@ pub fn cmd_env_list() -> Vec<EnvInfo> {
         .into_iter()
         .map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let dirs = [
-                ("config", env_config_dir(&name)),
-                ("data", env_data_dir(&name)),
-                ("state", env_state_dir(&name)),
-                ("cache", env_cache_dir(&name)),
-            ];
-            let dirs: Vec<_> = dirs
+            let dirs: Vec<_> = env_all_dirs(&name)
                 .into_iter()
                 .filter(|(_, dir)| dir.exists())
                 .map(|(label, dir)| {
@@ -312,12 +299,7 @@ pub fn cmd_env_delete(name: &str, force: bool) -> Result<(), String> {
         return Err(format!("Env '{}' does not exist.", name));
     }
 
-    let dirs = [
-        ("config", env_config_dir(name)),
-        ("data", env_data_dir(name)),
-        ("state", env_state_dir(name)),
-        ("cache", env_cache_dir(name)),
-    ];
+    let dirs = env_all_dirs(name);
 
     if !force {
         println!("The following directories will be deleted:");
@@ -368,14 +350,7 @@ pub fn cmd_env_rename(current: &str, new_name: &str) -> Result<(), String> {
         return Err(format!("Env '{}' already exists.", new_name));
     }
 
-    let dirs = [
-        ("config", env_config_dir(current), env_config_dir(new_name)),
-        ("data", env_data_dir(current), env_data_dir(new_name)),
-        ("state", env_state_dir(current), env_state_dir(new_name)),
-        ("cache", env_cache_dir(current), env_cache_dir(new_name)),
-    ];
-
-    for (label, src, dst) in &dirs {
+    for (label, src, dst) in &env_all_dir_pairs(current, new_name) {
         if src.exists() {
             if let Some(parent) = dst.parent() {
                 fs::create_dir_all(parent)
