@@ -28,10 +28,11 @@ kv --help
 Launch KoalaVim in different modes:
 
 ```bash
-kv -g              # git mode
-kv -t              # git tree mode
-kv --git-diff      # git diff mode
-kv --ai            # ai mode
+kv -g                  # git mode
+kv -t                  # git tree mode
+kv --git-diff          # git diff mode
+kv --ai                # ai mode
+kv -g -- file1 file2   # git mode with args passed to KoalaVim
 ```
 
 ### Virtual Koala Envs
@@ -113,5 +114,5 @@ kv -c /path/to/kvim.conf       # launch with custom kvim.conf
 kv -l /path/to/config.lua      # launch with custom lua config
 kv --nvim-bin-path /path/to/nvim  # override nvim binary
 kv -v                          # verbose output
-kv file.txt +42                # pass arguments to nvim
+kv -- file.txt +42             # pass arguments to nvim
 ```

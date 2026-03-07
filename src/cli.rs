@@ -66,7 +66,7 @@ pub struct Cli {
 
     /// Arguments to pass to nvim binary.
     /// On mode (git/tree) arguments passed to KoalaVim.
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    #[arg(last = true, allow_hyphen_values = true)]
     pub nvim_args: Vec<OsString>,
 
     /// Override nvim's binary path
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_cli_nvim_args_passthrough() {
-        let cli = Cli::try_parse_from(["kv", "file.txt", "+42"]).unwrap();
+        let cli = Cli::try_parse_from(["kv", "--", "file.txt", "+42"]).unwrap();
         assert_eq!(cli.nvim_args.len(), 2);
         assert_eq!(cli.nvim_args[0], "file.txt");
         assert_eq!(cli.nvim_args[1], "+42");

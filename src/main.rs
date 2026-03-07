@@ -40,12 +40,22 @@ fn run(cli: Cli) -> Result<(), String> {
                 return Ok(());
             }
             Commands::Completions { shell } => {
+                let mut buf = Vec::new();
                 clap_complete::generate(
                     *shell,
                     &mut Cli::command(),
                     "kv",
-                    &mut std::io::stdout(),
+                    &mut buf,
                 );
+                // Strip the nvim_args positional from zsh completions so
+                // subcommands complete correctly (clap_complete limitation).
+                let output = String::from_utf8_lossy(&buf);
+                for line in output.lines() {
+                    if line.contains("nvim_args") {
+                        continue;
+                    }
+                    println!("{}", line);
+                }
                 return Ok(());
             }
             Commands::Env { action } => {
