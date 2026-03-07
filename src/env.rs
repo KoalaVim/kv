@@ -1,4 +1,6 @@
 use crate::paths::*;
+use inquire::{Confirm, Select, Text};
+use owo_colors::OwoColorize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -44,16 +46,16 @@ pub fn cmd_env_create(name: &str, from: Option<&str>, branch: Option<&str>) -> R
 
     if let Some(source) = from {
         if is_git_url(source) {
+            eprintln!("{} {}...", "Cloning".green(), source.dimmed());
             let mut cmd = Command::new("git");
             cmd.arg("clone");
             if let Some(b) = branch {
                 cmd.arg("--branch").arg(b);
             }
             cmd.arg(source).arg(&config_dir);
-            let output = cmd.output().map_err(|e| format!("Failed to run git clone: {}", e))?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("git clone failed: {}", stderr.trim()));
+            let status = cmd.status().map_err(|e| format!("Failed to run git clone: {}", e))?;
+            if !status.success() {
+                return Err("git clone failed".to_string());
             }
             // Remove .git/ so the env starts as a clean config
             let git_dir = config_dir.join(".git");
@@ -85,11 +87,66 @@ pub fn cmd_env_create(name: &str, from: Option<&str>, branch: Option<&str>) -> R
     }
 
     println!(
-        "Created env '{}'. Populate config at: {}",
-        name,
-        config_dir.display()
+        "{} env '{}'. Populate config at: {}",
+        "Created".green(),
+        name.cyan().bold(),
+        config_dir.display().to_string().dimmed()
     );
     Ok(config_dir)
+}
+
+pub fn cmd_env_init(name: &str) -> Result<PathBuf, String> {
+    validate_env_name(name).map_err(|e| format!("Invalid env name: {}", e))?;
+
+    let config_dir = env_config_dir(name);
+    if config_dir.exists() {
+        return Err(format!(
+            "Env '{}' already exists at: {}",
+            name,
+            config_dir.display()
+        ));
+    }
+
+    let items = vec![
+        "Clean (empty config)",
+        "Copy from existing config directory",
+        "Clone from a git template",
+    ];
+    let selection = Select::new(
+        &format!("How do you want to set up '{}'?", name),
+        items,
+    )
+    .prompt()
+    .map_err(|e| format!("Prompt failed: {}", e))?;
+
+    match selection {
+        "Clean (empty config)" => cmd_env_create(name, None, None),
+        "Copy from existing config directory" => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            let default_path = format!("{}/.config/nvim", home);
+            let path = Text::new("Path to config directory:")
+                .with_default(&default_path)
+                .prompt()
+                .map_err(|e| format!("Prompt failed: {}", e))?;
+            cmd_env_create(name, Some(&path), None)
+        }
+        "Clone from a git template" => {
+            let url = Text::new("Git URL:")
+                .with_default("https://github.com/LazyVim/starter")
+                .prompt()
+                .map_err(|e| format!("Prompt failed: {}", e))?;
+            let branch = Text::new("Branch (leave empty for default):")
+                .prompt()
+                .map_err(|e| format!("Prompt failed: {}", e))?;
+            let branch = if branch.is_empty() {
+                None
+            } else {
+                Some(branch)
+            };
+            cmd_env_create(name, Some(&url), branch.as_deref())
+        }
+        _ => unreachable!(),
+    }
 }
 
 pub fn cmd_env_fork(source: &str, name: &str) -> Result<PathBuf, String> {
@@ -121,11 +178,20 @@ pub fn cmd_env_fork(source: &str, name: &str) -> Result<PathBuf, String> {
         if src.exists() {
             copy_dir_recursive(src, dst)
                 .map_err(|e| format!("Failed to copy {} dir: {}", label, e))?;
-            println!("Copied {} dir: {}", label, dst.display());
+            println!(
+                "  Copied {}: {}",
+                label.bold(),
+                dst.display().to_string().dimmed()
+            );
         }
     }
 
-    println!("Forked env '{}' from '{}'.", name, source);
+    println!(
+        "{} env '{}' from '{}'.",
+        "Forked".green(),
+        name.cyan().bold(),
+        source.cyan().bold()
+    );
     Ok(dest_config)
 }
 
@@ -195,6 +261,7 @@ pub fn format_size(bytes: u64) -> String {
 pub struct EnvInfo {
     pub name: String,
     pub dirs: Vec<(String, PathBuf, u64)>,
+    pub total_size: u64,
 }
 
 pub fn cmd_env_list() -> Vec<EnvInfo> {
@@ -223,7 +290,7 @@ pub fn cmd_env_list() -> Vec<EnvInfo> {
                 ("state", env_state_dir(&name)),
                 ("cache", env_cache_dir(&name)),
             ];
-            let dirs = dirs
+            let dirs: Vec<_> = dirs
                 .into_iter()
                 .filter(|(_, dir)| dir.exists())
                 .map(|(label, dir)| {
@@ -231,12 +298,13 @@ pub fn cmd_env_list() -> Vec<EnvInfo> {
                     (label.to_string(), dir, size)
                 })
                 .collect();
-            EnvInfo { name, dirs }
+            let total_size = dirs.iter().map(|(_, _, s)| s).sum();
+            EnvInfo { name, dirs, total_size }
         })
         .collect()
 }
 
-pub fn cmd_env_delete(name: &str) -> Result<(), String> {
+pub fn cmd_env_delete(name: &str, force: bool) -> Result<(), String> {
     validate_env_name(name).map_err(|e| format!("Invalid env name: {}", e))?;
 
     let config_dir = env_config_dir(name);
@@ -251,16 +319,79 @@ pub fn cmd_env_delete(name: &str) -> Result<(), String> {
         ("cache", env_cache_dir(name)),
     ];
 
+    if !force {
+        println!("The following directories will be deleted:");
+        for (label, dir) in &dirs {
+            if dir.exists() {
+                let size = dir_size(dir);
+                println!(
+                    "  {}: {} ({})",
+                    label.bold(),
+                    dir.display().to_string().dimmed(),
+                    format_size(size)
+                );
+            }
+        }
+        let confirmed = Confirm::new(&format!("Delete env '{}'?", name))
+            .with_default(false)
+            .prompt()
+            .map_err(|e| format!("Prompt failed: {}", e))?;
+        if !confirmed {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
     for (label, dir) in &dirs {
         if dir.exists() {
             fs::remove_dir_all(dir).unwrap_or_else(|e| {
                 eprintln!("Failed to remove {} dir: {}", label, e);
             });
-            println!("Removed {} dir: {}", label, dir.display());
         }
     }
 
-    println!("Deleted env '{}'.", name);
+    println!("{} env '{}'.", "Deleted".green(), name.cyan().bold());
+    Ok(())
+}
+
+pub fn cmd_env_rename(current: &str, new_name: &str) -> Result<(), String> {
+    validate_env_name(current).map_err(|e| format!("Invalid current env name: {}", e))?;
+    validate_env_name(new_name).map_err(|e| format!("Invalid new env name: {}", e))?;
+
+    let src_config = env_config_dir(current);
+    if !src_config.exists() {
+        return Err(format!("Env '{}' does not exist.", current));
+    }
+
+    let dst_config = env_config_dir(new_name);
+    if dst_config.exists() {
+        return Err(format!("Env '{}' already exists.", new_name));
+    }
+
+    let dirs = [
+        ("config", env_config_dir(current), env_config_dir(new_name)),
+        ("data", env_data_dir(current), env_data_dir(new_name)),
+        ("state", env_state_dir(current), env_state_dir(new_name)),
+        ("cache", env_cache_dir(current), env_cache_dir(new_name)),
+    ];
+
+    for (label, src, dst) in &dirs {
+        if src.exists() {
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create parent for {} dir: {}", label, e))?;
+            }
+            fs::rename(src, dst)
+                .map_err(|e| format!("Failed to rename {} dir: {}", label, e))?;
+        }
+    }
+
+    println!(
+        "{} env '{}' to '{}'.",
+        "Renamed".green(),
+        current.cyan().bold(),
+        new_name.cyan().bold()
+    );
     Ok(())
 }
 
@@ -385,11 +516,11 @@ mod tests {
         assert!(dup.is_err());
         assert!(dup.unwrap_err().contains("already exists"));
 
-        let del = cmd_env_delete("test-env");
+        let del = cmd_env_delete("test-env", true);
         assert!(del.is_ok());
         assert!(!config_dir.exists());
 
-        let del2 = cmd_env_delete("test-env");
+        let del2 = cmd_env_delete("test-env", true);
         assert!(del2.is_err());
         assert!(del2.unwrap_err().contains("does not exist"));
 
@@ -460,7 +591,7 @@ mod tests {
         assert!(env_state_dir("full-env").exists());
         assert!(env_cache_dir("full-env").exists());
 
-        cmd_env_delete("full-env").unwrap();
+        cmd_env_delete("full-env", true).unwrap();
 
         assert!(!env_config_dir("full-env").exists());
         assert!(!env_data_dir("full-env").exists());

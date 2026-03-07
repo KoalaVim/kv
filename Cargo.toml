@@ -8,6 +8,9 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.35"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+inquire = "0.9.4"
+owo-colors = { version = "4", features = ["supports-colors"] }
 
 [dev-dependencies]
 serial_test = "3"

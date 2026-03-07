@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -13,7 +14,7 @@ fn default_kvim_conf() -> PathBuf {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "kv", about = "Launcher for KoalaVim (neovim configuration)")]
+#[command(name = "kv", version, about = "Launcher for KoalaVim (neovim configuration)")]
 pub struct Cli {
     /// Verbose
     #[arg(short, long)]
@@ -83,6 +84,17 @@ pub enum Commands {
         #[command(subcommand)]
         action: EnvAction,
     },
+    /// Initialize a koala env interactively
+    Init {
+        /// Name of the env to initialize (default: main)
+        #[arg(long)]
+        env: Option<String>,
+    },
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -111,6 +123,16 @@ pub enum EnvAction {
     Delete {
         /// Name of the env to delete
         name: String,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Rename a virtual koala env
+    Rename {
+        /// Current env name
+        current: String,
+        /// New env name
+        new_name: String,
     },
 }
 
@@ -197,12 +219,47 @@ mod tests {
         let cli = Cli::try_parse_from(["kv", "env", "delete", "old-env"]).unwrap();
         match cli.command {
             Some(Commands::Env {
-                action: EnvAction::Delete { ref name },
+                action: EnvAction::Delete { ref name, force },
             }) => {
                 assert_eq!(name, "old-env");
+                assert!(!force);
             }
             _ => panic!("Expected Env Delete subcommand"),
         }
+    }
+
+    #[test]
+    fn test_cli_env_delete_force() {
+        let cli = Cli::try_parse_from(["kv", "env", "delete", "old-env", "-f"]).unwrap();
+        match cli.command {
+            Some(Commands::Env {
+                action: EnvAction::Delete { ref name, force },
+            }) => {
+                assert_eq!(name, "old-env");
+                assert!(force);
+            }
+            _ => panic!("Expected Env Delete subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_env_rename_subcommand() {
+        let cli = Cli::try_parse_from(["kv", "env", "rename", "old", "new"]).unwrap();
+        match cli.command {
+            Some(Commands::Env {
+                action: EnvAction::Rename { ref current, ref new_name },
+            }) => {
+                assert_eq!(current, "old");
+                assert_eq!(new_name, "new");
+            }
+            _ => panic!("Expected Env Rename subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_completions_subcommand() {
+        let cli = Cli::try_parse_from(["kv", "completions", "zsh"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Completions { .. })));
     }
 
     #[test]
@@ -247,6 +304,23 @@ mod tests {
                 assert_eq!(branch.as_deref(), Some("stable"));
             }
             _ => panic!("Expected Env Create subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_init_subcommand() {
+        let cli = Cli::try_parse_from(["kv", "init"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Init { env: None })));
+    }
+
+    #[test]
+    fn test_cli_init_with_env() {
+        let cli = Cli::try_parse_from(["kv", "init", "--env", "myenv"]).unwrap();
+        match cli.command {
+            Some(Commands::Init { ref env }) => {
+                assert_eq!(env.as_deref(), Some("myenv"));
+            }
+            _ => panic!("Expected Init subcommand"),
         }
     }
 

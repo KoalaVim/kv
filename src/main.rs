@@ -3,62 +3,129 @@ mod env;
 mod paths;
 
 use chrono::Local;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, EnvAction};
-use env::format_size;
+use env::{cmd_env_init, format_size};
+use owo_colors::OwoColorize;
 use paths::{env_appname, env_cache_dir, env_config_dir, env_data_dir, env_state_dir, xdg_data_home};
 use std::ffi::OsString;
 use std::fs;
 use std::process::Command;
 
-const DEFAULT_APPNAME: &str = "kvim";
-
-fn main() -> Result<(), String> {
+fn main() {
     let cli = Cli::parse();
+    if let Err(e) = run(cli) {
+        eprintln!("{} {}", "error:".red().bold(), e);
+        std::process::exit(1);
+    }
+}
 
+fn tilde_shorten(path: &std::path::Path) -> String {
+    let s = path.display().to_string();
+    if let Ok(home) = std::env::var("HOME") {
+        if let Some(rest) = s.strip_prefix(&home) {
+            return format!("~{}", rest);
+        }
+    }
+    s
+}
+
+fn run(cli: Cli) -> Result<(), String> {
     // Handle subcommands
-    if let Some(Commands::Env { action }) = &cli.command {
-        match action {
-            EnvAction::Create { name, from, branch } => {
-                env::cmd_env_create(name, from.as_deref(), branch.as_deref())?;
+    if let Some(command) = &cli.command {
+        match command {
+            Commands::Init { env } => {
+                let name = env.as_deref().unwrap_or("main");
+                cmd_env_init(name)?;
+                return Ok(());
             }
-            EnvAction::Fork { source, name } => {
-                env::cmd_env_fork(source, name)?;
+            Commands::Completions { shell } => {
+                clap_complete::generate(
+                    *shell,
+                    &mut Cli::command(),
+                    "kv",
+                    &mut std::io::stdout(),
+                );
+                return Ok(());
             }
-            EnvAction::List => {
-                let envs = env::cmd_env_list();
-                if envs.is_empty() {
-                    println!("No envs found.");
-                } else {
-                    for info in &envs {
-                        println!("  {}", info.name);
-                        for (label, dir, size) in &info.dirs {
-                            println!("    {}: {} ({})", label, dir.display(), format_size(*size));
+            Commands::Env { action } => {
+                match action {
+                    EnvAction::Create { name, from, branch } => {
+                        env::cmd_env_create(name, from.as_deref(), branch.as_deref())?;
+                    }
+                    EnvAction::Fork { source, name } => {
+                        env::cmd_env_fork(source, name)?;
+                    }
+                    EnvAction::List => {
+                        let mut envs = env::cmd_env_list();
+                        if envs.is_empty() {
+                            println!("No envs found.");
+                        } else {
+                            // Show default (main) env first
+                            if let Some(pos) = envs.iter().position(|e| e.name == "main") {
+                                envs.swap(0, pos);
+                            }
+                            for info in &envs {
+                                let default_marker = if info.name == "main" {
+                                    " (default)".dimmed().to_string()
+                                } else {
+                                    String::new()
+                                };
+                                println!(
+                                    "  {} [{}]{}",
+                                    info.name.cyan().bold(),
+                                    format_size(info.total_size),
+                                    default_marker
+                                );
+                                for (label, dir, size) in &info.dirs {
+                                    println!(
+                                        "    {}: {} ({})",
+                                        label.bold(),
+                                        tilde_shorten(dir).dimmed(),
+                                        format_size(*size)
+                                    );
+                                }
+                            }
+                            println!("\n{} env(s) found.", envs.len());
                         }
                     }
-                    println!("\n{} env(s) found.", envs.len());
+                    EnvAction::Delete { name, force } => {
+                        env::cmd_env_delete(name, *force)?;
+                    }
+                    EnvAction::Rename { current, new_name } => {
+                        env::cmd_env_rename(current, new_name)?;
+                    }
                 }
             }
-            EnvAction::Delete { name } => env::cmd_env_delete(name)?,
         }
         return Ok(());
     }
 
     // Determine NVIM_APPNAME
-    let appname = match &cli.env {
-        Some(name) => {
-            env::validate_env_name(name).map_err(|e| format!("Invalid env name: {}", e))?;
-            let config_dir = env_config_dir(name);
-            if !config_dir.exists() {
-                return Err(format!(
-                    "Env '{}' does not exist. Create it with: kv env create {}",
-                    name, name
-                ));
-            }
-            env_appname(name)
+    let env_name = cli.env.as_deref().unwrap_or("main");
+    env::validate_env_name(env_name).map_err(|e| format!("Invalid env name: {}", e))?;
+    let config_dir = env_config_dir(env_name);
+    if !config_dir.exists() {
+        if cli.env.is_some() {
+            return Err(format!(
+                "Env '{}' does not exist. Create it with: kv env create {}",
+                env_name, env_name
+            ));
+        } else {
+            eprintln!("Welcome to kv! No default environment found.");
+            eprintln!();
+            eprintln!("Run 'kv init' to set up your environment interactively, or:");
+            eprintln!("  kv init            Set up the default 'main' env");
+            eprintln!("  kv init --env foo  Set up a named env");
+            eprintln!();
+            eprintln!("For quick non-interactive setup:");
+            eprintln!("  kv env create main                          Empty config");
+            eprintln!("  kv env create main --from ~/.config/nvim    Copy existing config");
+            eprintln!("  kv env create main --from <git-url>         Clone a starter template");
+            std::process::exit(1);
         }
-        None => DEFAULT_APPNAME.to_string(),
-    };
+    }
+    let appname = env_appname(env_name);
 
     let mut koala_env: Vec<(OsString, OsString)> = vec![
         ("NVIM_APPNAME".into(), appname.clone().into()),
@@ -111,13 +178,11 @@ fn main() -> Result<(), String> {
 
     if cli.verbose {
         println!("NVIM_APPNAME: {}", appname);
-        if let Some(ref name) = cli.env {
-            println!("Env: {}", name);
-            println!("  config: {}", env_config_dir(name).display());
-            println!("  data:   {}", env_data_dir(name).display());
-            println!("  state:  {}", env_state_dir(name).display());
-            println!("  cache:  {}", env_cache_dir(name).display());
-        }
+        println!("Env: {}", env_name);
+        println!("  config: {}", env_config_dir(env_name).display());
+        println!("  data:   {}", env_data_dir(env_name).display());
+        println!("  state:  {}", env_state_dir(env_name).display());
+        println!("  cache:  {}", env_cache_dir(env_name).display());
         println!("Restart Indicator Path: {:?}", restart_kvim_file_indicator);
         println!("Koala Env: {:?}", koala_env);
     }
@@ -194,5 +259,19 @@ mod tests {
     fn test_join_args_empty() {
         let args: Vec<OsString> = vec![];
         assert_eq!(join_args(&args), OsString::from(""));
+    }
+
+    #[test]
+    fn test_tilde_shorten() {
+        if let Ok(home) = std::env::var("HOME") {
+            let path = std::path::PathBuf::from(&home).join("foo/bar");
+            assert_eq!(tilde_shorten(&path), "~/foo/bar");
+        }
+    }
+
+    #[test]
+    fn test_tilde_shorten_no_home() {
+        let path = std::path::PathBuf::from("/tmp/foo");
+        assert_eq!(tilde_shorten(&path), "/tmp/foo");
     }
 }
