@@ -47,6 +47,22 @@ Each env uses `NVIM_APPNAME` set to `kvim-envs/<name>`, which makes Neovim resol
 ~/.cache/kvim-envs/<name>/      # cache (compiled bytecode, etc.)
 ```
 
+By default, `kv` launches using the `main` env. Use `--env` to switch:
+
+```bash
+kv                  # launches in the "main" env
+kv --env my-env     # launches in "my-env"
+```
+
+#### Setup
+
+```bash
+kv init              # interactive setup wizard for the default "main" env
+kv init --env foo    # interactive setup for a named env
+```
+
+#### Managing Envs
+
 ```bash
 # Create a new env
 kv env create my-env
@@ -67,11 +83,19 @@ kv env list
 # Fork an env (copies config, data, state, and cache)
 kv env fork my-env my-env-copy
 
-# Launch KoalaVim in an env
-kv --env my-env
+# Rename an env
+kv env rename old-name new-name
 
 # Delete an env
 kv env delete my-env
+```
+
+### Shell Completions
+
+```bash
+kv completions zsh    # generate zsh completions
+kv completions bash   # generate bash completions
+kv completions fish   # generate fish completions
 ```
 
 ### Debug
