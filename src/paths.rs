@@ -3,40 +3,29 @@ use std::path::PathBuf;
 
 pub static ENV_PREFIX: &str = "kvim-envs";
 
-pub fn xdg_config_home() -> PathBuf {
-    env::var("XDG_CONFIG_HOME")
+fn xdg_dir(env_var: &str, fallback: &str) -> PathBuf {
+    env::var(env_var)
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             let home = env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-            PathBuf::from(home).join(".config")
+            PathBuf::from(home).join(fallback)
         })
+}
+
+pub fn xdg_config_home() -> PathBuf {
+    xdg_dir("XDG_CONFIG_HOME", ".config")
 }
 
 pub fn xdg_data_home() -> PathBuf {
-    env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-            PathBuf::from(home).join(".local/share")
-        })
+    xdg_dir("XDG_DATA_HOME", ".local/share")
 }
 
 pub fn xdg_state_home() -> PathBuf {
-    env::var("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-            PathBuf::from(home).join(".local/state")
-        })
+    xdg_dir("XDG_STATE_HOME", ".local/state")
 }
 
 pub fn xdg_cache_home() -> PathBuf {
-    env::var("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
-            PathBuf::from(home).join(".cache")
-        })
+    xdg_dir("XDG_CACHE_HOME", ".cache")
 }
 
 pub fn env_appname(name: &str) -> String {
