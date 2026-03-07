@@ -5,6 +5,7 @@ mod paths;
 use chrono::Local;
 use clap::Parser;
 use cli::{Cli, Commands, EnvAction};
+use env::format_size;
 use paths::{env_appname, env_cache_dir, env_config_dir, env_data_dir, env_state_dir, xdg_data_home};
 use std::ffi::OsString;
 use std::fs;
@@ -25,7 +26,18 @@ fn main() {
                 env::cmd_env_fork(source, name).map(|_| ())
             }
             EnvAction::List => {
-                env::cmd_env_list();
+                let envs = env::cmd_env_list();
+                if envs.is_empty() {
+                    println!("No envs found.");
+                } else {
+                    for info in &envs {
+                        println!("  {}", info.name);
+                        for (label, dir, size) in &info.dirs {
+                            println!("    {}: {} ({})", label, dir.display(), format_size(*size));
+                        }
+                    }
+                    println!("\n{} env(s) found.", envs.len());
+                }
                 Ok(())
             }
             EnvAction::Delete { name } => env::cmd_env_delete(name),
@@ -119,14 +131,7 @@ fn main() {
     if let Some(koala_mode_ok) = koala_mode {
         koala_env.push(("KOALA_MODE".into(), koala_mode_ok.into()));
 
-        koala_env.push((
-            "KOALA_ARGS".into(),
-            cli.nvim_args
-                .iter()
-                .map(|arg| arg.clone().into_string().unwrap())
-                .collect::<String>()
-                .into(),
-        ));
+        koala_env.push(("KOALA_ARGS".into(), join_args(&cli.nvim_args)));
     }
 
     if cli.verbose {
@@ -178,7 +183,7 @@ fn main() {
         }
 
         // Remove indicator
-        std::fs::remove_file(restart_kvim_file_indicator.clone())
+        std::fs::remove_file(&restart_kvim_file_indicator)
             .expect("failed to remove restart kvim file indicator");
 
         // Re-run kvim with KOALA_RESTART=1
@@ -186,15 +191,46 @@ fn main() {
     }
 }
 
-fn run_kvim(env: &Vec<(OsString, OsString)>, params: &Vec<OsString>) {
+fn join_args(args: &[OsString]) -> OsString {
+    args.iter()
+        .map(|arg| arg.clone().into_string().unwrap())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .into()
+}
+
+fn run_kvim(env: &[(OsString, OsString)], params: &[OsString]) {
     Popen::create(
-        &params,
+        params,
         PopenConfig {
-            env: Some(env.clone()),
+            env: Some(env.to_owned()),
             ..Default::default()
         },
     )
     .unwrap()
     .wait()
     .unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_join_args_separates_with_space() {
+        let args: Vec<OsString> = vec!["file1.txt".into(), "file2.txt".into()];
+        assert_eq!(join_args(&args), OsString::from("file1.txt file2.txt"));
+    }
+
+    #[test]
+    fn test_join_args_single() {
+        let args: Vec<OsString> = vec!["file.txt".into()];
+        assert_eq!(join_args(&args), OsString::from("file.txt"));
+    }
+
+    #[test]
+    fn test_join_args_empty() {
+        let args: Vec<OsString> = vec![];
+        assert_eq!(join_args(&args), OsString::from(""));
+    }
 }

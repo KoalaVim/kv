@@ -38,6 +38,10 @@ pub fn cmd_env_create(name: &str, from: Option<&str>, branch: Option<&str>) -> R
         ));
     }
 
+    if branch.is_some() && !from.is_some_and(is_git_url) {
+        return Err("--branch can only be used with a git URL source".to_string());
+    }
+
     if let Some(source) = from {
         if is_git_url(source) {
             let mut cmd = Command::new("git");
@@ -58,12 +62,10 @@ pub fn cmd_env_create(name: &str, from: Option<&str>, branch: Option<&str>) -> R
                     .map_err(|e| format!("Failed to remove .git directory: {}", e))?;
             }
         } else {
-            if branch.is_some() {
-                return Err("--branch can only be used with a git URL source".to_string());
-            }
             // Try as env name first, then as path
-            let source_path = if env_config_dir(source).exists() {
-                env_config_dir(source)
+            let source_dir = env_config_dir(source);
+            let source_path = if source_dir.exists() {
+                source_dir
             } else {
                 let p = PathBuf::from(source);
                 if !p.exists() {
@@ -78,9 +80,6 @@ pub fn cmd_env_create(name: &str, from: Option<&str>, branch: Option<&str>) -> R
                 .map_err(|e| format!("Failed to copy from source: {}", e))?;
         }
     } else {
-        if branch.is_some() {
-            return Err("--branch can only be used with a git URL source".to_string());
-        }
         fs::create_dir_all(&config_dir)
             .map_err(|e| format!("Failed to create env config dir: {}", e))?;
     }
@@ -136,7 +135,19 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
         let entry = entry?;
         let ty = entry.file_type()?;
         let dst_path = dst.join(entry.file_name());
-        if ty.is_dir() {
+        if ty.is_symlink() {
+            let target = fs::read_link(entry.path())?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, &dst_path)?;
+            #[cfg(windows)]
+            {
+                if target.is_dir() {
+                    std::os::windows::fs::symlink_dir(&target, &dst_path)?;
+                } else {
+                    std::os::windows::fs::symlink_file(&target, &dst_path)?;
+                }
+            }
+        } else if ty.is_dir() {
             copy_dir_recursive(&entry.path(), &dst_path)?;
         } else {
             fs::copy(entry.path(), dst_path)?;
@@ -152,10 +163,10 @@ fn dir_size(path: &Path) -> u64 {
     let mut total = 0u64;
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.filter_map(|e| e.ok()) {
-            let ft = entry.file_type().unwrap_or_else(|_| {
-                // fallback: treat as file
-                fs::metadata(entry.path()).unwrap().file_type()
-            });
+            let ft = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
             if ft.is_dir() {
                 total += dir_size(&entry.path());
             } else {
@@ -166,7 +177,7 @@ fn dir_size(path: &Path) -> u64 {
     total
 }
 
-fn format_size(bytes: u64) -> String {
+pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * KB;
     const GB: u64 = 1024 * MB;
@@ -181,11 +192,15 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-pub fn cmd_env_list() {
+pub struct EnvInfo {
+    pub name: String,
+    pub dirs: Vec<(String, PathBuf, u64)>,
+}
+
+pub fn cmd_env_list() -> Vec<EnvInfo> {
     let envs_dir = xdg_config_home().join(ENV_PREFIX);
     if !envs_dir.exists() {
-        println!("No envs found.");
-        return;
+        return Vec::new();
     }
 
     let mut entries: Vec<_> = match fs::read_dir(&envs_dir) {
@@ -193,40 +208,32 @@ pub fn cmd_env_list() {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
             .collect(),
-        Err(_) => {
-            println!("No envs found.");
-            return;
-        }
+        Err(_) => return Vec::new(),
     };
-
-    if entries.is_empty() {
-        println!("No envs found.");
-        return;
-    }
 
     entries.sort_by_key(|e| e.file_name());
 
-    for entry in &entries {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        let dirs = [
-            ("config", env_config_dir(&name_str)),
-            ("data", env_data_dir(&name_str)),
-            ("state", env_state_dir(&name_str)),
-            ("cache", env_cache_dir(&name_str)),
-        ];
-
-        println!("  {}", name_str);
-        for (label, dir) in &dirs {
-            if dir.exists() {
-                let size = dir_size(dir);
-                println!("    {}: {} ({})", label, dir.display(), format_size(size));
-            }
-        }
-    }
-
-    println!("\n{} env(s) found.", entries.len());
+    entries
+        .into_iter()
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let dirs = [
+                ("config", env_config_dir(&name)),
+                ("data", env_data_dir(&name)),
+                ("state", env_state_dir(&name)),
+                ("cache", env_cache_dir(&name)),
+            ];
+            let dirs = dirs
+                .into_iter()
+                .filter(|(_, dir)| dir.exists())
+                .map(|(label, dir)| {
+                    let size = dir_size(&dir);
+                    (label.to_string(), dir, size)
+                })
+                .collect();
+            EnvInfo { name, dirs }
+        })
+        .collect()
 }
 
 pub fn cmd_env_delete(name: &str) -> Result<(), String> {
@@ -260,6 +267,7 @@ pub fn cmd_env_delete(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::env;
     use tempfile::TempDir;
 
@@ -271,13 +279,6 @@ mod tests {
         env::set_var("XDG_STATE_HOME", base.join("state"));
         env::set_var("XDG_CACHE_HOME", base.join("cache"));
         tmp
-    }
-
-    fn cleanup_xdg_env() {
-        env::remove_var("XDG_CONFIG_HOME");
-        env::remove_var("XDG_DATA_HOME");
-        env::remove_var("XDG_STATE_HOME");
-        env::remove_var("XDG_CACHE_HOME");
     }
 
     // --- validate_env_name ---
@@ -371,6 +372,7 @@ mod tests {
     // --- cmd_env_create / cmd_env_delete integration ---
 
     #[test]
+    #[serial]
     fn test_env_create_and_delete() {
         let _tmp = with_temp_xdg();
 
@@ -391,10 +393,10 @@ mod tests {
         assert!(del2.is_err());
         assert!(del2.unwrap_err().contains("does not exist"));
 
-        cleanup_xdg_env();
     }
 
     #[test]
+    #[serial]
     fn test_env_create_with_invalid_name() {
         let _tmp = with_temp_xdg();
 
@@ -402,10 +404,10 @@ mod tests {
         assert!(cmd_env_create("", None, None).is_err());
         assert!(cmd_env_create("..", None, None).is_err());
 
-        cleanup_xdg_env();
     }
 
     #[test]
+    #[serial]
     fn test_env_create_from_path() {
         let _tmp = with_temp_xdg();
         let source = _tmp.path().join("my-source-cfg");
@@ -421,10 +423,10 @@ mod tests {
             "-- test config"
         );
 
-        cleanup_xdg_env();
     }
 
     #[test]
+    #[serial]
     fn test_env_create_from_existing_env() {
         let _tmp = with_temp_xdg();
 
@@ -440,10 +442,10 @@ mod tests {
             "-- source"
         );
 
-        cleanup_xdg_env();
     }
 
     #[test]
+    #[serial]
     fn test_env_delete_cleans_all_xdg_dirs() {
         let _tmp = with_temp_xdg();
 
@@ -465,10 +467,10 @@ mod tests {
         assert!(!env_state_dir("full-env").exists());
         assert!(!env_cache_dir("full-env").exists());
 
-        cleanup_xdg_env();
     }
 
     #[test]
+    #[serial]
     fn test_env_create_rejects_branch_without_git_url() {
         let _tmp = with_temp_xdg();
 
@@ -482,12 +484,12 @@ mod tests {
         assert!(result2.is_err());
         assert!(result2.unwrap_err().contains("--branch can only be used with a git URL"));
 
-        cleanup_xdg_env();
     }
 
     // --- env fork ---
 
     #[test]
+    #[serial]
     fn test_env_fork_copies_all_dirs() {
         let _tmp = with_temp_xdg();
 
@@ -520,10 +522,10 @@ mod tests {
             "cache"
         );
 
-        cleanup_xdg_env();
     }
 
     #[test]
+    #[serial]
     fn test_env_fork_nonexistent_source() {
         let _tmp = with_temp_xdg();
 
@@ -531,10 +533,10 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("does not exist"));
 
-        cleanup_xdg_env();
     }
 
     #[test]
+    #[serial]
     fn test_env_fork_duplicate_dest() {
         let _tmp = with_temp_xdg();
 
@@ -545,6 +547,5 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
 
-        cleanup_xdg_env();
     }
 }

@@ -117,7 +117,6 @@ pub enum EnvAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
 
     #[test]
     fn test_cli_default_parse() {

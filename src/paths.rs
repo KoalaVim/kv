@@ -62,6 +62,7 @@ pub fn env_cache_dir(name: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_env_appname() {
@@ -70,6 +71,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_dir_helpers() {
         let tmp = tempfile::TempDir::new().unwrap();
         let base = tmp.path();
