@@ -21,7 +21,11 @@ kv
 
 ## How It Works
 
-Each env maps to a set of XDG directories scoped by name:
+Each env maps to a set of directories scoped by name, matching Neovim's own `stdpath()` resolution. Under the hood, `kv` sets `NVIM_APPNAME=kvim-envs/<name>`, which tells Neovim to use these directories instead of the default `nvim` ones.
+
+### Linux / macOS
+
+Neovim follows the XDG Base Directory Specification on both Linux and macOS:
 
 ```
 ~/.config/kvim-envs/<name>/       config (init.lua, plugins, etc.)
@@ -30,7 +34,18 @@ Each env maps to a set of XDG directories scoped by name:
 ~/.cache/kvim-envs/<name>/        cache (compiled bytecode)
 ```
 
-Under the hood, `kv` sets `NVIM_APPNAME=kvim-envs/<name>`, which tells Neovim to use these directories instead of the default `~/.config/nvim`.
+XDG environment variables (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`) are respected if set.
+
+### Windows
+
+```
+%LOCALAPPDATA%\kvim-envs\<name>\        config
+%LOCALAPPDATA%\kvim-envs\<name>-data\   data
+%LOCALAPPDATA%\kvim-envs\<name>-data\   state (same as data)
+%TEMP%\kvim-envs\<name>\                cache
+```
+
+The `-data` suffix on data and state matches Neovim's own Windows behavior, which disambiguates them from config since they share the same `%LOCALAPPDATA%` base. XDG environment variables take precedence if set.
 
 ## Creating Envs
 

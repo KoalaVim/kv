@@ -7,7 +7,7 @@ use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, EnvAction};
 use env::{cmd_env_init, format_size};
 use owo_colors::OwoColorize;
-use paths::{env_all_dirs, env_appname, env_config_dir, xdg_data_home};
+use paths::{env_all_dirs, env_appname, env_config_dir, env_data_dir};
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
@@ -234,7 +234,7 @@ fn launch_nvim(cli: Cli) -> Result<(), String> {
     let mut koala_env = build_koala_env(&cli, &appname, koala_mode)?;
     let params = build_nvim_params(&cli, koala_mode);
 
-    let restart_indicator = xdg_data_home().join(&appname).join("restart_kvim");
+    let restart_indicator = env_data_dir(&env_name).join("restart_kvim");
 
     if cli.verbose {
         print_verbose_info(&env_name, &appname, &restart_indicator, &koala_env, &params);

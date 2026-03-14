@@ -258,7 +258,7 @@ pub struct EnvInfo {
 }
 
 pub fn cmd_env_list() -> Vec<EnvInfo> {
-    let envs_dir = xdg_config_home().join(ENV_PREFIX);
+    let envs_dir = envs_config_root();
     if !envs_dir.exists() {
         return Vec::new();
     }
