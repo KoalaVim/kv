@@ -37,59 +37,17 @@ kv -g -- file1 file2   # git mode with args passed to KoalaVim
 
 ### Virtual Koala Envs
 
-Manage isolated KoalaVim environments with separate config, data, state, and cache directories (following XDG conventions).
-
-Each env uses `NVIM_APPNAME` set to `kvim-envs/<name>`, which makes Neovim resolve its directories under the XDG base paths:
-
-```
-~/.config/kvim-envs/<name>/     # config (init.lua, plugins, etc.)
-~/.local/share/kvim-envs/<name>/  # data (installed plugins, etc.)
-~/.local/state/kvim-envs/<name>/  # state (shada, logs, etc.)
-~/.cache/kvim-envs/<name>/      # cache (compiled bytecode, etc.)
-```
-
-By default, `kv` launches using the `main` env. Use `--env` to switch:
+Run multiple isolated Neovim configurations side by side. Each env gets its own config, data, state, and cache.
 
 ```bash
-kv                  # launches in the "main" env
-kv --env my-env     # launches in "my-env"
-```
-
-#### Setup
-
-```bash
-kv init              # interactive setup wizard for the default "main" env
-kv init --env foo    # interactive setup for a named env
-```
-
-#### Managing Envs
-
-```bash
-# Create a new env
-kv env create my-env
-
-# Create from an existing env
-kv env create new-env --from my-env
-
-# Create from a git URL
+kv init                        # interactive setup wizard
 kv env create lazyvim --from https://github.com/LazyVim/starter
-kv env create lazyvim --from https://github.com/LazyVim/starter --branch stable
-
-# Create from a local path
-kv env create custom --from /path/to/nvim/config
-
-# List all envs
-kv env list
-
-# Fork an env (copies config, data, state, and cache)
-kv env fork my-env my-env-copy
-
-# Rename an env
-kv env rename old-name new-name
-
-# Delete an env
-kv env delete my-env
+kv --env lazyvim               # launch in a specific env
+kv env fork main experiment    # full copy of an existing env
+kv env list                    # see all envs and disk usage
 ```
+
+See [docs/envs.md](docs/envs.md) for the full guide with real-world examples.
 
 ### Shell Completions
 
