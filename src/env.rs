@@ -266,7 +266,7 @@ pub fn cmd_env_list() -> Vec<EnvInfo> {
     let mut entries: Vec<_> = match fs::read_dir(&envs_dir) {
         Ok(rd) => rd
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter(|e| e.path().is_dir())
             .collect(),
         Err(_) => return Vec::new(),
     };
