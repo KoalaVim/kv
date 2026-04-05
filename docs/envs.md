@@ -79,7 +79,14 @@ kv env create main --from ~/.config/nvim
 
 ### From a git template
 
-Try a community Neovim distribution without affecting anything else:
+Clone the [KoalaVim configuration template](https://github.com/KoalaVim/KoalaConfig.template) to get started with a recommended setup:
+
+```bash
+kv env create main --from https://github.com/KoalaVim/KoalaConfig.template
+kv
+```
+
+Or try a community Neovim distribution without affecting anything else:
 
 ```bash
 kv env create lazyvim --from https://github.com/LazyVim/starter
@@ -169,6 +176,13 @@ kv env delete lazyvim -f
 ```
 
 ## Real-World Examples
+
+### Set up KoalaVim from the official template
+
+```bash
+kv env create main --from https://github.com/KoalaVim/KoalaConfig.template
+kv   # launches KoalaVim with the template config, plugins install on first run
+```
 
 ### Try LazyVim without affecting your setup
 

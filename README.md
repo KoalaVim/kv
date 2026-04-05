@@ -41,8 +41,8 @@ Run multiple isolated Neovim configurations side by side. Each env gets its own 
 
 ```bash
 kv init                        # interactive setup wizard
-kv env create lazyvim --from https://github.com/LazyVim/starter
-kv --env lazyvim               # launch in a specific env
+kv env create main --from https://github.com/KoalaVim/KoalaConfig.template
+kv                             # launch KoalaVim ("main")
 kv env fork main experiment    # full copy of an existing env
 kv env list                    # see all envs and disk usage
 ```
