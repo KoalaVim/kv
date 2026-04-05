@@ -1,139 +1,183 @@
+mod cli;
+mod env;
+mod paths;
+
 use chrono::Local;
-use once_cell::sync::Lazy;
+use clap::{CommandFactory, Parser};
+use cli::{Cli, Commands, EnvAction};
+use env::{cmd_env_init, format_size};
+use owo_colors::OwoColorize;
+use paths::{env_all_dirs, env_appname, env_config_dir, env_data_dir};
+use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::{env, ffi::OsString};
-use structopt::StructOpt;
-use subprocess::{Popen, PopenConfig};
-
-static DEFAULT_DEBUG_DIR: Lazy<String> = Lazy::new(|| {
-    format!(
-        "{}/kvim",
-        env::temp_dir()
-            .as_path()
-            .to_str()
-            .unwrap_or("FAILED_TO_GET_TMP_DIR")
-    )
-});
-
-static DEFAULT_KVIM_CONF: Lazy<String> = Lazy::new(|| {
-    format!(
-        "{}/.kvim.conf",
-        env::var("HOME")
-            .as_deref()
-            .unwrap_or("FAILED_TO_GET_HOME_DIR"),
-    )
-});
-
-static DEFAULT_PROFILE_DIR: Lazy<String> = Lazy::new(|| {
-    xdg::BaseDirectories::with_prefix("kvim")
-        .unwrap()
-        .get_data_home()
-        .as_os_str()
-        .to_str()
-        .unwrap_or("FAILED_TO_GET_KVIM_DATA_PATH")
-        .to_string()
-});
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "kv", about = "Launcher for KoalaVim (neovim configuration)")]
-struct Args {
-    /// Verbose
-    #[structopt(short, long)]
-    verbose: bool,
-
-    /// Start KoalaVim in git mode
-    #[structopt(short, long)]
-    git: bool,
-
-    /// Start KoalaVim in git tree mode
-    #[structopt(short, long)]
-    tree: bool,
-
-    /// Start KoalaVim in git diff mode
-    #[structopt(long)]
-    git_diff: bool,
-
-    /// Start KoalaVim in ai mode
-    #[structopt(long)]
-    ai: bool,
-
-    /// Start KoalaVim in debug mode, output goes to --debug_dir/<time_stamp>
-    #[structopt(short, long)]
-    debug: bool,
-
-    /// Disable noice. disables notifications, helpful for debugging messages
-    #[structopt(short, long)]
-    no_noice: bool,
-
-    /// Change output log for debug
-    #[structopt(long, parse(from_os_str), default_value = &DEFAULT_DEBUG_DIR)]
-    debug_dir: PathBuf,
-
-    /// Override debug file name (default is timestamp)
-    #[structopt(long)]
-    debug_file: Option<String>,
-
-    /// Launch with given kvim.conf
-    #[structopt(short, long, parse(from_os_str), default_value = &DEFAULT_KVIM_CONF)]
-    cfg: PathBuf,
-
-    /// Launch with given lua cfg
-    #[structopt(short, long, parse(from_os_str))]
-    lua_cfg: Option<PathBuf>,
-
-    /// Launch with given plugin profile (creates new data dir at --profiles_dir)
-    #[structopt(short, long, default_value = "upstream")]
-    profile: String,
-
-    /// Plugin profiles base directory
-    #[structopt(long, parse(from_os_str), default_value = &DEFAULT_PROFILE_DIR)]
-    profile_dir: PathBuf,
-
-    /// Override `XDG_STATE_HOME` for a each profile. (state dir contains sessions data, various
-    /// plugins data, runtime data and more)
-    #[structopt(long)]
-    override_state: bool,
-
-    /// Arguments to pass to nvim binary.
-    /// On mode (git/tree) arguments passed to KoalaVim.
-    #[structopt()]
-    nvim_args: Vec<OsString>,
-
-    /// Override nvim's binary path
-    #[structopt(short, long, parse(from_os_str))]
-    nvim_bin_path: Option<PathBuf>,
-}
+use std::path::PathBuf;
+use std::process::Command;
 
 fn main() {
-    let args = Args::from_args();
-
-    let mut koala_env: Vec<(OsString, OsString)> = vec![];
-    koala_env.push(("KOALA_KVIM_CONF".into(), args.cfg.into()));
-
-    let mut profile_dir = args.profile_dir.clone();
-    if env::var("NVIM").is_ok() {
-        // When running kv inside a nvim instance the data dir is:
-        // `$XDG_DATA_HOME/kvim/upstream/kvim/` instead of `$XDG_DATA_HOME/kvim/`
-        profile_dir.pop();
-        profile_dir.pop();
+    let cli = Cli::parse();
+    if let Err(e) = run(cli) {
+        eprintln!("{} {}", "error:".red().bold(), e);
+        std::process::exit(1);
     }
+}
 
-    let data_dir = profile_dir.join(args.profile.clone());
-    koala_env.push(("XDG_DATA_HOME".into(), data_dir.clone().into()));
-
-    if args.override_state {
-        let state_dir = xdg::BaseDirectories::with_prefix("kvim")
-            .unwrap()
-            .get_state_home()
-            .join(Path::new(&args.profile));
-
-        koala_env.push(("XDG_STATE_HOME".into(), state_dir.into()));
+fn tilde_shorten(path: &std::path::Path) -> String {
+    let s = path.display().to_string();
+    if let Ok(home) = std::env::var("HOME") {
+        if let Some(rest) = s.strip_prefix(&home) {
+            return format!("~{}", rest);
+        }
     }
+    s
+}
 
-    if args.debug {
-        let mut debug_file = args.debug_dir.clone();
-        if let Some(file_name) = args.debug_file {
+fn run(cli: Cli) -> Result<(), String> {
+    if let Some(command) = &cli.command {
+        return handle_subcommand(command);
+    }
+    launch_nvim(cli)
+}
+
+fn handle_subcommand(command: &Commands) -> Result<(), String> {
+    match command {
+        Commands::Init { env } => {
+            let name = env.as_deref().unwrap_or("main");
+            cmd_env_init(name)?;
+        }
+        Commands::Completions { shell } => {
+            let mut buf = Vec::new();
+            clap_complete::generate(
+                *shell,
+                &mut Cli::command(),
+                "kv",
+                &mut buf,
+            );
+            // Strip the nvim_args positional from zsh completions so
+            // subcommands complete correctly (clap_complete limitation).
+            let output = String::from_utf8_lossy(&buf);
+            for line in output.lines() {
+                if line.contains("nvim_args") {
+                    continue;
+                }
+                println!("{}", line);
+            }
+        }
+        Commands::Env { action } => {
+            handle_env_action(action)?;
+        }
+    }
+    Ok(())
+}
+
+fn handle_env_action(action: &EnvAction) -> Result<(), String> {
+    match action {
+        EnvAction::Create { name, from, branch } => {
+            env::cmd_env_create(name, from.as_deref(), branch.as_deref())?;
+        }
+        EnvAction::Fork { source, name } => {
+            env::cmd_env_fork(source, name)?;
+        }
+        EnvAction::List => {
+            print_env_list();
+        }
+        EnvAction::Delete { name, force } => {
+            env::cmd_env_delete(name, *force)?;
+        }
+        EnvAction::Rename { current, new_name } => {
+            env::cmd_env_rename(current, new_name)?;
+        }
+    }
+    Ok(())
+}
+
+fn print_env_list() {
+    let mut envs = env::cmd_env_list();
+    if envs.is_empty() {
+        println!("No envs found.");
+        return;
+    }
+    // Show default (main) env first
+    if let Some(pos) = envs.iter().position(|e| e.name == "main") {
+        envs.swap(0, pos);
+    }
+    for info in &envs {
+        let default_marker = if info.name == "main" {
+            " (default)".dimmed().to_string()
+        } else {
+            String::new()
+        };
+        println!(
+            "  {} [{}]{}",
+            info.name.cyan().bold(),
+            format_size(info.total_size),
+            default_marker
+        );
+        for (label, dir, size) in &info.dirs {
+            println!(
+                "    {}: {} ({})",
+                label.bold(),
+                tilde_shorten(dir).dimmed(),
+                format_size(*size)
+            );
+        }
+    }
+    println!("\n{} env(s) found.", envs.len());
+}
+
+fn resolve_env_name(cli: &Cli) -> Result<String, String> {
+    let env_name = cli.env.as_deref().unwrap_or("main");
+    env::validate_env_name(env_name).map_err(|e| format!("Invalid env name: {}", e))?;
+    let config_dir = env_config_dir(env_name);
+    if !config_dir.exists() {
+        if cli.env.is_some() {
+            return Err(format!(
+                "Env '{}' does not exist. Create it with: kv env create {}",
+                env_name, env_name
+            ));
+        } else {
+            eprintln!("Welcome to kv! No default environment found.");
+            eprintln!();
+            eprintln!("Run 'kv init' to set up your environment interactively, or:");
+            eprintln!("  kv init            Set up the default 'main' env");
+            eprintln!("  kv init --env foo  Set up a named env");
+            eprintln!();
+            eprintln!("For quick non-interactive setup:");
+            eprintln!("  kv env create main                          Empty config");
+            eprintln!("  kv env create main --from ~/.config/nvim    Copy existing config");
+            eprintln!("  kv env create main --from <git-url>         Clone a starter template");
+            std::process::exit(1);
+        }
+    }
+    Ok(env_name.to_string())
+}
+
+fn resolve_koala_mode(cli: &Cli) -> Result<Option<&'static str>, String> {
+    let modes = [
+        (cli.git, "git"),
+        (cli.tree, "git_tree"),
+        (cli.git_diff, "git_diff"),
+        (cli.ai, "ai"),
+    ];
+    let active: Vec<_> = modes.iter().filter(|(flag, _)| *flag).collect();
+    if active.len() > 1 {
+        return Err("Multiple koala modes is not supported".to_string());
+    }
+    Ok(active.first().map(|(_, name)| *name))
+}
+
+fn build_koala_env(
+    cli: &Cli,
+    appname: &str,
+    koala_mode: Option<&str>,
+) -> Result<Vec<(OsString, OsString)>, String> {
+    let mut koala_env: Vec<(OsString, OsString)> = vec![
+        ("NVIM_APPNAME".into(), appname.into()),
+        ("KOALA_KVIM_CONF".into(), cli.cfg.as_os_str().into()),
+    ];
+
+    if cli.debug {
+        let mut debug_file = cli.debug_dir.clone();
+        if let Some(file_name) = &cli.debug_file {
             debug_file.push(file_name);
         } else {
             let now = Local::now();
@@ -142,120 +186,147 @@ fn main() {
 
         koala_env.push(("KOALA_DEBUG_OUT".into(), debug_file.into()));
 
-        fs::create_dir_all(args.debug_dir).expect("failed to create debug dir")
+        fs::create_dir_all(&cli.debug_dir)
+            .map_err(|e| format!("Failed to create debug dir: {}", e))?;
     }
 
-    if args.no_noice {
+    if cli.no_noice {
         koala_env.push(("KOALA_NO_NOICE".into(), "1".into()));
     }
 
-    let mut koala_mode: Option<&str> = None;
-    if args.git {
+    if koala_mode.is_some() {
         koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
-        koala_mode = Some("git");
-    }
-    if args.tree {
-        if koala_mode.is_some() {
-            eprintln!("Multiple koala modes is not supported");
-            return;
-        }
-
-        koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
-        koala_mode = Some("git_tree");
-    }
-    if args.git_diff {
-        if koala_mode.is_some() {
-            eprintln!("Multiple koala modes is not supported");
-            return;
-        }
-
-        koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
-        koala_mode = Some("git_diff");
-    }
-    if args.ai {
-        if koala_mode.is_some() {
-            eprintln!("Multiple koala modes is not supported");
-            return;
-        }
-
-        koala_env.push(("KOALA_NO_SESSION".into(), "1".into()));
-        koala_mode = Some("ai");
     }
 
-    if let Some(koala_mode_ok) = koala_mode {
-        koala_env.push(("KOALA_MODE".into(), koala_mode_ok.into()));
-
-        koala_env.push((
-            "KOALA_ARGS".into(),
-            args.nvim_args
-                .iter()
-                .map(|arg| arg.clone().into_string().unwrap())
-                .collect::<String>()
-                .into(),
-        ));
+    if let Some(mode) = koala_mode {
+        koala_env.push(("KOALA_MODE".into(), mode.into()));
+        koala_env.push(("KOALA_ARGS".into(), join_args(&cli.nvim_args)));
     }
 
-    if args.verbose {
-        println!("Koala Env: {:?}", koala_env);
-    }
-    let mut env = PopenConfig::current_env();
-    env.append(&mut koala_env);
-
-    if args.verbose {
-        println!("Env: {:?}", env);
-    }
-
-    let mut params: Vec<OsString> = vec![];
-    if koala_mode.is_none() {
-        params.append(&mut args.nvim_args.clone());
-    }
-
-    if let Some(lua_cfg) = args.lua_cfg {
-        let lua_cfg_params: Vec<OsString> = vec!["-l".into(), lua_cfg.into()];
-        params.append(&mut lua_cfg_params.clone());
-    }
-
-    if let Some(bin_path) = args.nvim_bin_path {
-        params.insert(0, bin_path.into());
-    } else {
-        params.insert(0, "nvim".into());
-    }
-
-    let restart_kvim_file_indicator = data_dir.join(Path::new("nvim/restart_kvim"));
-    if args.verbose {
-        println!("Restart Indicator Path: {:?}", restart_kvim_file_indicator);
-    }
-
-    if args.verbose {
-        println!("Nvim Launch Params: {:?}", params);
-    }
-    run_kvim(&env, &params);
-
-    // Push restart env value for the next run
-    env.push(("KOALA_RESTART".into(), "1".into()));
-    loop {
-        if !restart_kvim_file_indicator.exists() {
-            break; // stop running when restart indicator doesn't exist
-        }
-
-        // Remove indicator
-        std::fs::remove_file(restart_kvim_file_indicator.clone())
-            .expect("failed to remove restart kvim file indicator");
-
-        // Re-run kvim with KOALA_RESTART=1
-        run_kvim(&env, &params);
-    }
+    Ok(koala_env)
 }
 
-fn run_kvim(env: &Vec<(OsString, OsString)>, params: &Vec<OsString>) {
-    Popen::create(
-        &params,
-        PopenConfig {
-            env: Some(env.clone()),
-            ..Default::default()
-        },
-    )
-    .unwrap()
-    .wait()
-    .unwrap();
+fn build_nvim_params(cli: &Cli, koala_mode: Option<&str>) -> Vec<OsString> {
+    let mut params: Vec<OsString> = vec![];
+
+    let nvim_bin: OsString = cli
+        .nvim_bin_path
+        .as_ref()
+        .map(|p| p.as_os_str().into())
+        .unwrap_or_else(|| "nvim".into());
+    params.push(nvim_bin);
+
+    if koala_mode.is_none() {
+        params.extend(cli.nvim_args.iter().cloned());
+    }
+
+    if let Some(lua_cfg) = &cli.lua_cfg {
+        params.extend([OsString::from("-l"), lua_cfg.as_os_str().into()]);
+    }
+
+    params
+}
+
+fn launch_nvim(cli: Cli) -> Result<(), String> {
+    let env_name = resolve_env_name(&cli)?;
+    let appname = env_appname(&env_name);
+    let koala_mode = resolve_koala_mode(&cli)?;
+    let mut koala_env = build_koala_env(&cli, &appname, koala_mode)?;
+    let params = build_nvim_params(&cli, koala_mode);
+
+    let restart_indicator = env_data_dir(&env_name).join("restart_kvim");
+
+    if cli.verbose {
+        print_verbose_info(&env_name, &appname, &restart_indicator, &koala_env, &params);
+    }
+
+    run_kvim(&koala_env, &params)?;
+
+    // Push restart env value for subsequent runs
+    koala_env.push(("KOALA_RESTART".into(), "1".into()));
+    while restart_indicator.exists() {
+        fs::remove_file(&restart_indicator)
+            .map_err(|e| format!("Failed to remove restart indicator: {}", e))?;
+        run_kvim(&koala_env, &params)?;
+    }
+
+    Ok(())
+}
+
+fn print_verbose_info(
+    env_name: &str,
+    appname: &str,
+    restart_indicator: &PathBuf,
+    koala_env: &[(OsString, OsString)],
+    params: &[OsString],
+) {
+    println!("NVIM_APPNAME: {}", appname);
+    println!("Env: {}", env_name);
+    for (label, dir) in &env_all_dirs(env_name) {
+        println!("  {}:  {}", label, dir.display());
+    }
+    println!("Restart Indicator Path: {:?}", restart_indicator);
+    println!("Koala Env: {:?}", koala_env);
+    println!("Nvim Launch Params: {:?}", params);
+}
+
+fn join_args(args: &[OsString]) -> OsString {
+    let mut result = OsString::new();
+    for (i, arg) in args.iter().enumerate() {
+        if i > 0 {
+            result.push(" ");
+        }
+        result.push(arg);
+    }
+    result
+}
+
+fn run_kvim(env: &[(OsString, OsString)], params: &[OsString]) -> Result<(), String> {
+    let status = Command::new(&params[0])
+        .args(&params[1..])
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .status()
+        .map_err(|e| format!("Failed to launch nvim: {}", e))?;
+    if !status.success() {
+        let code = status.code().unwrap_or(1);
+        return Err(format!("nvim exited with code {}", code));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_join_args_separates_with_space() {
+        let args: Vec<OsString> = vec!["file1.txt".into(), "file2.txt".into()];
+        assert_eq!(join_args(&args), OsString::from("file1.txt file2.txt"));
+    }
+
+    #[test]
+    fn test_join_args_single() {
+        let args: Vec<OsString> = vec!["file.txt".into()];
+        assert_eq!(join_args(&args), OsString::from("file.txt"));
+    }
+
+    #[test]
+    fn test_join_args_empty() {
+        let args: Vec<OsString> = vec![];
+        assert_eq!(join_args(&args), OsString::from(""));
+    }
+
+    #[test]
+    fn test_tilde_shorten() {
+        if let Ok(home) = std::env::var("HOME") {
+            let path = std::path::PathBuf::from(&home).join("foo/bar");
+            assert_eq!(tilde_shorten(&path), "~/foo/bar");
+        }
+    }
+
+    #[test]
+    fn test_tilde_shorten_no_home() {
+        let path = std::path::PathBuf::from("/tmp/foo");
+        assert_eq!(tilde_shorten(&path), "/tmp/foo");
+    }
 }
