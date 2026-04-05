@@ -59,6 +59,7 @@ fn handle_subcommand(command: &Commands) -> Result<(), String> {
                 if line.contains("nvim_args") {
                     continue;
                 }
+                let line = line.replace("line[2]", "line[1]");
                 println!("{}", line);
             }
         }
