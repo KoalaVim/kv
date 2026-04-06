@@ -290,10 +290,13 @@ fn patch_zsh_completions(shell: Shell, raw: &str) -> String {
         output.push('\n');
     }
 
-    // Complete file/directory paths alongside subcommands at the top level.
+    // Offer file/directory completions at the top level (alongside subcommands).
+    // Placed in _kv() after _arguments so it runs with the correct completion context.
+    // Conditioned on no subcommand state so it only fires for top-level completion
+    // (e.g. "kv R<tab>"), not inside subcommand handlers (e.g. "kv env <tab>").
     output = output.replace(
-        "    _describe -t commands 'kv commands' commands \"$@\"\n",
-        "    _describe -t commands 'kv commands' commands \"$@\"\n    _files\n",
+        "&& ret=0\n    case $state in\n    (kv)\n",
+        "&& ret=0\n    [[ -z \"$state\" ]] && _files && ret=0\n    case $state in\n    (kv)\n",
     );
 
     // When the first arg isn't a subcommand, fall back to file completion.
