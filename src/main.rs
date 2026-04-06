@@ -4,6 +4,7 @@ mod paths;
 
 use chrono::Local;
 use clap::{CommandFactory, Parser};
+use clap_complete::Shell;
 use cli::{Cli, Commands, EnvAction};
 use env::{cmd_env_init, format_size};
 use owo_colors::OwoColorize;
@@ -52,16 +53,8 @@ fn handle_subcommand(command: &Commands) -> Result<(), String> {
                 "kv",
                 &mut buf,
             );
-            // Strip the nvim_args positional from zsh completions so
-            // subcommands complete correctly (clap_complete limitation).
-            let output = String::from_utf8_lossy(&buf);
-            for line in output.lines() {
-                if line.contains("nvim_args") {
-                    continue;
-                }
-                let line = line.replace("line[2]", "line[1]");
-                println!("{}", line);
-            }
+            let raw = String::from_utf8_lossy(&buf);
+            print!("{}", patch_zsh_completions(*shell, &raw));
         }
         Commands::Env { action } => {
             handle_env_action(action)?;
@@ -280,6 +273,37 @@ fn join_args(args: &[OsString]) -> OsString {
         result.push(arg);
     }
     result
+}
+
+fn patch_zsh_completions(shell: Shell, raw: &str) -> String {
+    if !matches!(shell, Shell::Zsh) {
+        return raw.to_string();
+    }
+
+    let mut output = String::new();
+    for line in raw.lines() {
+        if line.contains("nvim_args") {
+            continue;
+        }
+        let line = line.replace("line[2]", "line[1]");
+        output.push_str(&line);
+        output.push('\n');
+    }
+
+    // Complete file/directory paths alongside subcommands at the top level.
+    output = output.replace(
+        "    _describe -t commands 'kv commands' commands \"$@\"\n",
+        "    _describe -t commands 'kv commands' commands \"$@\"\n    _files\n",
+    );
+
+    // When the first arg isn't a subcommand, fall back to file completion.
+    let end = "        esac\n    ;;\nesac\n}\n";
+    if let Some(pos) = output.rfind(end) {
+        let fallback = "            (*)\n_files && ret=0\n;;\n";
+        output.insert_str(pos, fallback);
+    }
+
+    output
 }
 
 fn run_kvim(env: &[(OsString, OsString)], params: &[OsString]) -> Result<(), String> {
