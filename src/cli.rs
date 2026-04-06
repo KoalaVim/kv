@@ -14,7 +14,7 @@ fn default_kvim_conf() -> PathBuf {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "kv", version, about = "Launcher for KoalaVim (neovim configuration)")]
+#[command(name = "kv", version, about = "Launcher for KoalaVim (neovim configuration)", trailing_var_arg = true)]
 pub struct Cli {
     /// Verbose
     #[arg(short, long)]
@@ -66,7 +66,7 @@ pub struct Cli {
 
     /// Arguments to pass to nvim binary.
     /// On mode (git/tree) arguments passed to KoalaVim.
-    #[arg(last = true, allow_hyphen_values = true)]
+    #[arg(allow_hyphen_values = true)]
     pub nvim_args: Vec<OsString>,
 
     /// Override nvim's binary path
@@ -268,6 +268,29 @@ mod tests {
         assert_eq!(cli.nvim_args.len(), 2);
         assert_eq!(cli.nvim_args[0], "file.txt");
         assert_eq!(cli.nvim_args[1], "+42");
+    }
+
+    #[test]
+    fn test_cli_nvim_args_direct() {
+        let cli = Cli::try_parse_from(["kv", "file.txt"]).unwrap();
+        assert_eq!(cli.nvim_args.len(), 1);
+        assert_eq!(cli.nvim_args[0], "file.txt");
+    }
+
+    #[test]
+    fn test_cli_nvim_args_direct_multiple() {
+        let cli = Cli::try_parse_from(["kv", "file1.txt", "file2.txt"]).unwrap();
+        assert_eq!(cli.nvim_args.len(), 2);
+        assert_eq!(cli.nvim_args[0], "file1.txt");
+        assert_eq!(cli.nvim_args[1], "file2.txt");
+    }
+
+    #[test]
+    fn test_cli_nvim_args_with_kv_flags() {
+        let cli = Cli::try_parse_from(["kv", "-v", "file.txt"]).unwrap();
+        assert!(cli.verbose);
+        assert_eq!(cli.nvim_args.len(), 1);
+        assert_eq!(cli.nvim_args[0], "file.txt");
     }
 
     #[test]
