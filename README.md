@@ -32,8 +32,17 @@ See [docs/docker.md](docs/docker.md) for mounting configs, persisting state, and
 ## Quick Start
 
 ```bash
-kv init              # interactive setup wizard for the default "main" env
-kv                   # launch KoalaVim
+# Create the main env with the KoalaConfig starter
+kv env create main --from https://github.com/KoalaVim/KoalaConfig.template
+
+# Launch KoalaVim
+kv 
+```
+
+Or use the interactive wizard:
+
+```bash
+kv init
 ```
 
 ## Commands
