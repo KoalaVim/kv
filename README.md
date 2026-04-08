@@ -20,6 +20,15 @@ cd kv
 cargo install --locked --path .
 ```
 
+## Try Without Installing
+
+```bash
+docker build -t kv .
+docker run -it --rm kv
+```
+
+See [docs/docker.md](docs/docker.md) for mounting configs, persisting state, and testing features.
+
 ## Quick Start
 
 ```bash
