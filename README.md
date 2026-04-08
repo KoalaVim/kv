@@ -1,76 +1,63 @@
-# KoalaVim's launcher
+# kv
 
-CLI tool to launch [KoalaVim](https://github.com/KoalaVim/KoalaVim)
+CLI tool to launch and manage [KoalaVim](https://github.com/KoalaVim/KoalaVim) environments.
+
+`kv` is a single Rust binary that handles launching KoalaVim in different modes, managing isolated virtual environments, keeping plugins in sync via lockfiles, updating KoalaVim, installing dependencies, and running health checks.
 
 ## Installation
 
-### kv
-1. Make sure [Cargo](https://www.rust-lang.org/tools/install) is installed properly (`~/.cargo/bin` should be in your `PATH`).
-2. Install (fetch & build) the tool.
+Make sure [Cargo](https://www.rust-lang.org/tools/install) is installed (`~/.cargo/bin` should be in your `PATH`).
+
 ```bash
 CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --locked --git=https://github.com/KoalaVim/kv.git
 ```
 
+Or build locally:
+
 ```bash
-# Install locally
 git clone https://github.com/KoalaVim/kv.git
 cd kv
 cargo install --locked --path .
 ```
 
-## Usage
-```bash
-kv --help
-```
-
-### Modes
-
-Launch KoalaVim in different modes:
+## Quick Start
 
 ```bash
-kv -g                  # git mode
-kv -t                  # git tree mode
-kv --git-diff          # git diff mode
-kv --ai                # ai mode
-kv -g -- file1 file2   # git mode with args passed to KoalaVim
+kv init              # interactive setup wizard for the default "main" env
+kv                   # launch KoalaVim
 ```
 
-### Virtual Koala Envs
+## Commands
 
-Run multiple isolated Neovim configurations side by side. Each env gets its own config, data, state, and cache.
+| Command | Description | Docs |
+|---|---|---|
+| `kv [files...]` | Launch KoalaVim (default) | [docs/launcher.md](docs/launcher.md) |
+| `kv env <action>` | Manage virtual koala envs | [docs/envs.md](docs/envs.md) |
+| `kv lockfile <action>` | Manage the lazy.nvim lockfile | [docs/lockfile.md](docs/lockfile.md) |
+| `kv update` | Update KoalaVim to a target version | [docs/update.md](docs/update.md) |
+| `kv install` | Install dependencies into the env | [docs/install.md](docs/install.md) |
+| `kv health` | Check health of dependencies | [docs/health.md](docs/health.md) |
+| `kv init` | Interactive env setup wizard | [docs/envs.md](docs/envs.md) |
+| `kv completions <shell>` | Generate shell completions | -- |
+
+All commands respect the `--env` flag to operate on a specific virtual koala env (default: `main`).
 
 ```bash
-kv init                        # interactive setup wizard
-kv env create main --from https://github.com/KoalaVim/KoalaConfig.template
-kv                             # launch KoalaVim ("main")
-kv env fork main experiment    # full copy of an existing env
-kv env list                    # see all envs and disk usage
+kv --env myenv              # launch in "myenv"
+kv --env myenv health       # check health for "myenv"
+kv --env myenv install      # install deps into "myenv"
 ```
 
-See [docs/envs.md](docs/envs.md) for the full guide with real-world examples.
-
-### Shell Completions
+## Shell Completions
 
 ```bash
-kv completions zsh    # generate zsh completions
-kv completions bash   # generate bash completions
-kv completions fish   # generate fish completions
+kv completions zsh     # generate zsh completions
+kv completions bash    # generate bash completions
+kv completions fish    # generate fish completions
 ```
 
-### Debug
+## Platform Support
 
-```bash
-kv -d                          # debug mode, logs to --debug-dir/<timestamp>
-kv -d --debug-file my-log      # custom debug file name
-kv -n                          # disable noice (notifications)
-```
-
-### Other Options
-
-```bash
-kv -c /path/to/kvim.conf       # launch with custom kvim.conf
-kv -l /path/to/config.lua      # launch with custom lua config
-kv --nvim-bin-path /path/to/nvim  # override nvim binary
-kv -v                          # verbose output
-kv -- file.txt +42             # pass arguments to nvim
-```
+- Linux
+- macOS
+- Windows
