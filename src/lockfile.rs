@@ -152,7 +152,13 @@ pub fn lazy_restore(env_name: &str) -> Result<(), String> {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    let result: Result<Value, _> = serde_json::from_str(&stderr);
+    // Find the JSON line in stderr — nvim may append extra characters (e.g. ":")
+    let json_str = stderr
+        .lines()
+        .find(|l| l.starts_with('{'))
+        .unwrap_or("")
+        .trim();
+    let result: Result<Value, _> = serde_json::from_str(json_str);
     match result {
         Ok(val) => {
             if let Some(plugins) = val.get("plugins").and_then(|p| p.as_object()) {
