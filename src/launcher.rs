@@ -89,6 +89,7 @@ fn build_koala_env(
     let mut koala_env: Vec<(OsString, OsString)> = vec![
         ("NVIM_APPNAME".into(), appname.into()),
         ("KOALA_KVIM_CONF".into(), cli.cfg.as_os_str().into()),
+        ("KOALA_ENV".into(), env_name.into()),
     ];
 
     let bin_dir = env_bin_dir(env_name);
