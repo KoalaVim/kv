@@ -6,6 +6,36 @@ CLI tool to launch and manage [KoalaVim](https://github.com/KoalaVim/KoalaVim) e
 
 ## Installation
 
+`kv` is a Rust binary. It can be installed with `cargo`, or with `pip` / `uv`
+(packaged via [maturin](https://www.maturin.rs/)). All methods require a Rust
+toolchain to build the binary.
+
+### With `uv` (recommended)
+
+```bash
+# From Git
+uv tool install git+https://github.com/KoalaVim/kv.git
+
+# From a local checkout
+git clone https://github.com/KoalaVim/kv.git
+cd kv
+uv tool install .
+```
+
+### With `pip`
+
+```bash
+# From Git
+pip install git+https://github.com/KoalaVim/kv.git
+
+# From a local checkout
+git clone https://github.com/KoalaVim/kv.git
+cd kv
+pip install .
+```
+
+### With `cargo`
+
 Make sure [Cargo](https://www.rust-lang.org/tools/install) is installed (`~/.cargo/bin` should be in your `PATH`).
 
 ```bash
@@ -18,6 +48,16 @@ Or build locally:
 git clone https://github.com/KoalaVim/kv.git
 cd kv
 cargo install --locked --path .
+```
+
+### Building a wheel
+
+To build a redistributable wheel (e.g. to publish or install offline):
+
+```bash
+uvx maturin build --release
+# wheel is written to target/wheels/
+pip install target/wheels/kv-*.whl
 ```
 
 ## Try Without Installing
@@ -78,4 +118,3 @@ kv completions fish    # generate fish completions
 
 - Linux
 - macOS
-- Windows
