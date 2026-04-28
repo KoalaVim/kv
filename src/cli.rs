@@ -14,7 +14,12 @@ fn default_kvim_conf() -> PathBuf {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "kv", version, about = "Launcher for KoalaVim (neovim configuration)", trailing_var_arg = true)]
+#[command(
+    name = "kv",
+    version,
+    about = "CLI tool to launch and manage KoalaVim",
+    trailing_var_arg = true
+)]
 pub struct Cli {
     /// Verbose
     #[arg(short, long)]
@@ -60,7 +65,7 @@ pub struct Cli {
     #[arg(short, long)]
     pub lua_cfg: Option<PathBuf>,
 
-    /// Launch in a virtual koala env
+    /// Virtual koala env to operate on (default: main)
     #[arg(long)]
     pub env: Option<String>,
 
@@ -95,6 +100,34 @@ pub enum Commands {
         /// Shell to generate completions for
         shell: Shell,
     },
+    /// Manage the lazy.nvim plugin lockfile
+    Lockfile {
+        #[command(subcommand)]
+        action: LockfileAction,
+    },
+    /// Update KoalaVim to a target version
+    Update {
+        /// Target commit or branch (default: master)
+        #[arg(long, default_value = "master")]
+        target: String,
+        /// Git remote name
+        #[arg(long, default_value = "origin")]
+        remote: String,
+        /// Force update even if KoalaVim dir is dirty
+        #[arg(short, long)]
+        force: bool,
+        /// Skip running lazy restore after update
+        #[arg(long)]
+        no_restore: bool,
+    },
+    /// Install KoalaVim dependencies into the current env
+    Install {
+        /// Show what would be done without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Check health of KoalaVim dependencies
+    Health,
 }
 
 #[derive(Debug, Subcommand)]
@@ -133,6 +166,18 @@ pub enum EnvAction {
         current: String,
         /// New env name
         new_name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LockfileAction {
+    /// Show differences between user and KoalaVim lockfiles
+    Diff,
+    /// Overwrite user lockfile with KoalaVim's and run lazy restore
+    Overwrite {
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
     },
 }
 
@@ -247,7 +292,11 @@ mod tests {
         let cli = Cli::try_parse_from(["kv", "env", "rename", "old", "new"]).unwrap();
         match cli.command {
             Some(Commands::Env {
-                action: EnvAction::Rename { ref current, ref new_name },
+                action:
+                    EnvAction::Rename {
+                        ref current,
+                        ref new_name,
+                    },
             }) => {
                 assert_eq!(current, "old");
                 assert_eq!(new_name, "new");
@@ -352,12 +401,123 @@ mod tests {
         let cli = Cli::try_parse_from(["kv", "env", "fork", "source-env", "new-env"]).unwrap();
         match cli.command {
             Some(Commands::Env {
-                action: EnvAction::Fork { ref source, ref name },
+                action:
+                    EnvAction::Fork {
+                        ref source,
+                        ref name,
+                    },
             }) => {
                 assert_eq!(source, "source-env");
                 assert_eq!(name, "new-env");
             }
             _ => panic!("Expected Env Fork subcommand"),
         }
+    }
+
+    #[test]
+    fn test_cli_lockfile_diff() {
+        let cli = Cli::try_parse_from(["kv", "lockfile", "diff"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Lockfile {
+                action: LockfileAction::Diff
+            })
+        ));
+    }
+
+    #[test]
+    fn test_cli_lockfile_overwrite() {
+        let cli = Cli::try_parse_from(["kv", "lockfile", "overwrite", "--yes"]).unwrap();
+        match cli.command {
+            Some(Commands::Lockfile {
+                action: LockfileAction::Overwrite { yes },
+            }) => {
+                assert!(yes);
+            }
+            _ => panic!("Expected Lockfile Overwrite subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_update_defaults() {
+        let cli = Cli::try_parse_from(["kv", "update"]).unwrap();
+        match cli.command {
+            Some(Commands::Update {
+                ref target,
+                ref remote,
+                force,
+                no_restore,
+            }) => {
+                assert_eq!(target, "master");
+                assert_eq!(remote, "origin");
+                assert!(!force);
+                assert!(!no_restore);
+            }
+            _ => panic!("Expected Update subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_update_with_options() {
+        let cli = Cli::try_parse_from([
+            "kv",
+            "update",
+            "--target",
+            "v2.0",
+            "--remote",
+            "upstream",
+            "--force",
+            "--no-restore",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Update {
+                ref target,
+                ref remote,
+                force,
+                no_restore,
+            }) => {
+                assert_eq!(target, "v2.0");
+                assert_eq!(remote, "upstream");
+                assert!(force);
+                assert!(no_restore);
+            }
+            _ => panic!("Expected Update subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_install() {
+        let cli = Cli::try_parse_from(["kv", "install"]).unwrap();
+        match cli.command {
+            Some(Commands::Install { dry_run }) => {
+                assert!(!dry_run);
+            }
+            _ => panic!("Expected Install subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_install_dry_run() {
+        let cli = Cli::try_parse_from(["kv", "install", "--dry-run"]).unwrap();
+        match cli.command {
+            Some(Commands::Install { dry_run }) => {
+                assert!(dry_run);
+            }
+            _ => panic!("Expected Install subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_health() {
+        let cli = Cli::try_parse_from(["kv", "health"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Health)));
+    }
+
+    #[test]
+    fn test_cli_env_flag_with_subcommand() {
+        let cli = Cli::try_parse_from(["kv", "--env", "myenv", "health"]).unwrap();
+        assert_eq!(cli.env.as_deref(), Some("myenv"));
+        assert!(matches!(cli.command, Some(Commands::Health)));
     }
 }

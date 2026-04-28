@@ -1,76 +1,81 @@
-# KoalaVim's launcher
+# kv
 
-CLI tool to launch [KoalaVim](https://github.com/KoalaVim/KoalaVim)
+CLI tool to launch and manage [KoalaVim](https://github.com/KoalaVim/KoalaVim) environments.
+
+`kv` is a single Rust binary that handles launching KoalaVim in different modes, managing isolated virtual environments, keeping plugins in sync via lockfiles, updating KoalaVim, installing dependencies, and running health checks.
 
 ## Installation
 
-### kv
-1. Make sure [Cargo](https://www.rust-lang.org/tools/install) is installed properly (`~/.cargo/bin` should be in your `PATH`).
-2. Install (fetch & build) the tool.
+Make sure [Cargo](https://www.rust-lang.org/tools/install) is installed (`~/.cargo/bin` should be in your `PATH`).
+
 ```bash
 CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install --locked --git=https://github.com/KoalaVim/kv.git
 ```
 
+Or build locally:
+
 ```bash
-# Install locally
 git clone https://github.com/KoalaVim/kv.git
 cd kv
 cargo install --locked --path .
 ```
 
-## Usage
+## Try Without Installing
+
 ```bash
-kv --help
+docker build -t kv .
+docker run -it --rm kv
 ```
 
-### Modes
+See [docs/docker.md](docs/docker.md) for mounting configs, persisting state, and testing features.
 
-Launch KoalaVim in different modes:
-
-```bash
-kv -g                  # git mode
-kv -t                  # git tree mode
-kv --git-diff          # git diff mode
-kv --ai                # ai mode
-kv -g -- file1 file2   # git mode with args passed to KoalaVim
-```
-
-### Virtual Koala Envs
-
-Run multiple isolated Neovim configurations side by side. Each env gets its own config, data, state, and cache.
+## Quick Start
 
 ```bash
-kv init                        # interactive setup wizard
+# Create the main env with the KoalaConfig starter
 kv env create main --from https://github.com/KoalaVim/KoalaConfig.template
-kv                             # launch KoalaVim ("main")
-kv env fork main experiment    # full copy of an existing env
-kv env list                    # see all envs and disk usage
+
+# Launch KoalaVim
+kv 
 ```
 
-See [docs/envs.md](docs/envs.md) for the full guide with real-world examples.
-
-### Shell Completions
+Or use the interactive wizard:
 
 ```bash
-kv completions zsh    # generate zsh completions
-kv completions bash   # generate bash completions
-kv completions fish   # generate fish completions
+kv init
 ```
 
-### Debug
+## Commands
+
+| Command | Description | Docs |
+|---|---|---|
+| `kv [files...]` | Launch KoalaVim (default) | [docs/launcher.md](docs/launcher.md) |
+| `kv env <action>` | Manage virtual koala envs | [docs/envs.md](docs/envs.md) |
+| `kv lockfile <action>` | Manage the lazy.nvim lockfile | [docs/lockfile.md](docs/lockfile.md) |
+| `kv update` | Update KoalaVim to a target version | [docs/update.md](docs/update.md) |
+| `kv install` | Install dependencies into the env | [docs/install.md](docs/install.md) |
+| `kv health` | Check health of dependencies | [docs/health.md](docs/health.md) |
+| `kv init` | Interactive env setup wizard | [docs/envs.md](docs/envs.md) |
+| `kv completions <shell>` | Generate shell completions | -- |
+
+All commands respect the `--env` flag to operate on a specific virtual koala env (default: `main`).
 
 ```bash
-kv -d                          # debug mode, logs to --debug-dir/<timestamp>
-kv -d --debug-file my-log      # custom debug file name
-kv -n                          # disable noice (notifications)
+kv --env myenv              # launch in "myenv"
+kv --env myenv health       # check health for "myenv"
+kv --env myenv install      # install deps into "myenv"
 ```
 
-### Other Options
+## Shell Completions
 
 ```bash
-kv -c /path/to/kvim.conf       # launch with custom kvim.conf
-kv -l /path/to/config.lua      # launch with custom lua config
-kv --nvim-bin-path /path/to/nvim  # override nvim binary
-kv -v                          # verbose output
-kv -- file.txt +42             # pass arguments to nvim
+kv completions zsh     # generate zsh completions
+kv completions bash    # generate bash completions
+kv completions fish    # generate fish completions
 ```
+
+## Platform Support
+
+- Linux
+- macOS
+- Windows
