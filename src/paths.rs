@@ -122,6 +122,14 @@ pub fn env_kv_data_dir(name: &str) -> PathBuf {
     env_data_dir(name).join("kv")
 }
 
+/// Per-env neovim runtime directory (installed by `kv install`).
+pub fn env_nvim_runtime_dir(name: &str) -> PathBuf {
+    env_kv_data_dir(name)
+        .join("share")
+        .join("nvim")
+        .join("runtime")
+}
+
 /// User's lazy-lock.json for the given env.
 pub fn env_lockfile(name: &str) -> PathBuf {
     env_config_dir(name).join("lazy-lock.json")

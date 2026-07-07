@@ -1,6 +1,8 @@
 use crate::cli::Cli;
 use crate::env;
-use crate::paths::{env_all_dirs, env_appname, env_bin_dir, env_config_dir, env_data_dir};
+use crate::paths::{
+    env_all_dirs, env_appname, env_bin_dir, env_config_dir, env_data_dir, env_nvim_runtime_dir,
+};
 use chrono::Local;
 use std::ffi::OsString;
 use std::fs;
@@ -101,6 +103,11 @@ fn build_koala_env(
             new_path.push(&current_path);
         }
         koala_env.push(("PATH".into(), new_path));
+    }
+
+    let runtime_dir = env_nvim_runtime_dir(env_name);
+    if runtime_dir.exists() {
+        koala_env.push(("VIMRUNTIME".into(), runtime_dir.into_os_string()));
     }
 
     if cli.debug {

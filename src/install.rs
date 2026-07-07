@@ -1,4 +1,4 @@
-use crate::paths::{env_bin_dir, env_kv_data_dir};
+use crate::paths::{env_bin_dir, env_kv_data_dir, env_nvim_runtime_dir};
 use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -258,6 +258,56 @@ fn find_binary_in_dir(dir: &Path, binary_name: &str) -> Result<PathBuf, String> 
         .ok_or_else(|| format!("Binary '{}' not found in {}", binary_name, dir.display()))
 }
 
+/// Find `share/nvim/runtime` within the extracted neovim directory tree.
+fn find_nvim_runtime_dir(dir: &Path) -> Option<PathBuf> {
+    find_dir_recursive(dir, "runtime", &["share", "nvim"])
+}
+
+/// Recursively find a directory by name, verifying its ancestor path contains the required segments.
+fn find_dir_recursive(
+    dir: &Path,
+    target_name: &str,
+    ancestor_segments: &[&str],
+) -> Option<PathBuf> {
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let fname = entry.file_name();
+            if fname.to_string_lossy() == target_name {
+                let path_str = path.display().to_string();
+                if ancestor_segments.iter().all(|seg| path_str.contains(seg)) {
+                    return Some(path);
+                }
+            }
+            if let Some(found) = find_dir_recursive(&path, target_name, ancestor_segments) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// Copy a directory tree recursively.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst)
+        .map_err(|e| format!("Failed to create dir {}: {}", dst.display(), e))?;
+    let entries =
+        fs::read_dir(src).map_err(|e| format!("Failed to read dir {}: {}", src.display(), e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("Failed to copy {}: {}", src_path.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
 fn find_binary_recursive(dir: &Path, name: &str) -> Option<PathBuf> {
     let entries = fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
@@ -371,7 +421,7 @@ pub fn cmd_install(env_name: &str, dry_run: bool) -> Result<(), String> {
             continue;
         }
 
-        match install_single_dep(dep, pattern, &bin_dir, &tmp_dir, &mut manifest) {
+        match install_single_dep(dep, pattern, &bin_dir, &tmp_dir, &mut manifest, env_name) {
             Ok(()) => {
                 println!("  {} {}", "OK".green().bold(), dep.name);
             }
@@ -410,6 +460,7 @@ fn install_single_dep(
     bin_dir: &Path,
     tmp_dir: &Path,
     manifest: &mut InstallManifest,
+    env_name: &str,
 ) -> Result<(), String> {
     let (url, tag) = resolve_download_url(dep.github_repo, dep.version, pattern)?;
     println!("      downloading: {}", url.dimmed());
@@ -432,6 +483,21 @@ fn install_single_dep(
         bin_dir.display().to_string().dimmed()
     );
     install_binary(&binary_path, bin_dir)?;
+
+    if dep.name == "neovim" {
+        if let Some(runtime_src) = find_nvim_runtime_dir(&extract_dir) {
+            let runtime_dst = env_nvim_runtime_dir(env_name);
+            if runtime_dst.exists() {
+                fs::remove_dir_all(&runtime_dst)
+                    .map_err(|e| format!("Failed to remove old runtime: {}", e))?;
+            }
+            println!(
+                "      installing runtime to {}",
+                runtime_dst.display().to_string().dimmed()
+            );
+            copy_dir_recursive(&runtime_src, &runtime_dst)?;
+        }
+    }
 
     manifest.installed.insert(
         dep.name.to_string(),

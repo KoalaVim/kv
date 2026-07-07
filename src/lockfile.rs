@@ -1,4 +1,4 @@
-use crate::paths::{env_appname, env_lockfile, kvim_lockfile};
+use crate::paths::{env_appname, env_bin_dir, env_lockfile, env_nvim_runtime_dir, kvim_lockfile};
 use inquire::Confirm;
 use owo_colors::OwoColorize;
 use serde_json::Value;
@@ -144,9 +144,24 @@ pub fn lazy_restore(env_name: &str) -> Result<(), String> {
         ":Lazy restore".bold(),
     );
 
-    let output = Command::new("nvim")
-        .args(["--headless", "+LazyRestoreLogged", "+qa"])
-        .env("NVIM_APPNAME", &appname)
+    let bin_dir = env_bin_dir(env_name);
+    let nvim_bin = bin_dir.join("nvim");
+    let nvim_cmd = if nvim_bin.exists() {
+        nvim_bin.into_os_string()
+    } else {
+        "nvim".into()
+    };
+
+    let mut cmd = Command::new(&nvim_cmd);
+    cmd.args(["--headless", "+LazyRestoreLogged", "+qa"])
+        .env("NVIM_APPNAME", &appname);
+
+    let runtime_dir = env_nvim_runtime_dir(env_name);
+    if runtime_dir.exists() {
+        cmd.env("VIMRUNTIME", &runtime_dir);
+    }
+
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to run nvim for lazy restore: {}", e))?;
 
