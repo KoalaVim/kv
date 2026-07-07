@@ -34,7 +34,7 @@ static DEPENDENCIES: &[Dependency] = &[
     Dependency {
         name: "neovim",
         github_repo: "neovim/neovim",
-        version: "stable",
+        version: "v0.12.2",
         binary_name: "nvim",
         asset_patterns: &[
             (Os::Linux, Arch::X86_64, "nvim-linux-x86_64.tar.gz"),
