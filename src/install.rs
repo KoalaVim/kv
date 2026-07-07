@@ -87,6 +87,20 @@ static DEPENDENCIES: &[Dependency] = &[
         ],
         strip_components: 0,
     },
+    Dependency {
+        name: "tree-sitter",
+        github_repo: "tree-sitter/tree-sitter",
+        version: "latest",
+        binary_name: "tree-sitter",
+        asset_patterns: &[
+            (Os::Linux, Arch::X86_64, "tree-sitter-cli-linux-x64.zip"),
+            (Os::Linux, Arch::Aarch64, "tree-sitter-cli-linux-arm64.zip"),
+            (Os::MacOs, Arch::X86_64, "tree-sitter-cli-macos-x64.zip"),
+            (Os::MacOs, Arch::Aarch64, "tree-sitter-cli-macos-arm64.zip"),
+            (Os::Windows, Arch::X86_64, "tree-sitter-cli-windows-x64.zip"),
+        ],
+        strip_components: 0,
+    },
 ];
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -344,7 +358,20 @@ fn install_binary(src: &Path, bin_dir: &Path) -> Result<(), String> {
             .map_err(|e| format!("Failed to set permissions: {}", e))?;
     }
 
+    #[cfg(target_os = "macos")]
+    codesign_adhoc(&dest);
+
     Ok(())
+}
+
+/// Re-sign binary with a local ad-hoc signature so macOS Gatekeeper allows execution.
+/// The provenance xattr on newer macOS is irremovable, but a fresh local signature overrides it.
+#[cfg(target_os = "macos")]
+fn codesign_adhoc(path: &Path) {
+    let _ = Command::new("codesign")
+        .args(["--force", "--sign", "-"])
+        .arg(path)
+        .output();
 }
 
 fn read_manifest(env_name: &str) -> InstallManifest {
