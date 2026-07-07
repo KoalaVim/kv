@@ -81,8 +81,8 @@ static DEPENDENCIES: &[Dependency] = &[
         asset_patterns: &[
             (Os::Linux, Arch::X86_64, "linux_amd64.tar.gz"),
             (Os::Linux, Arch::Aarch64, "linux_arm64.tar.gz"),
-            (Os::MacOs, Arch::X86_64, "darwin_amd64.zip"),
-            (Os::MacOs, Arch::Aarch64, "darwin_arm64.zip"),
+            (Os::MacOs, Arch::X86_64, "darwin_amd64.tar.gz"),
+            (Os::MacOs, Arch::Aarch64, "darwin_arm64.tar.gz"),
             (Os::Windows, Arch::X86_64, "windows_amd64.zip"),
         ],
         strip_components: 0,
