@@ -1,4 +1,4 @@
-use crate::paths::{env_bin_dir, env_kv_data_dir, env_nvim_runtime_dir};
+use crate::paths::{env_bin_dir, env_kv_data_dir, env_node_dir, env_nvim_runtime_dir};
 use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -20,6 +20,12 @@ enum Arch {
     Aarch64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallMode {
+    SingleBinary,
+    FullTree,
+}
+
 struct Dependency {
     name: &'static str,
     github_repo: &'static str,
@@ -28,6 +34,10 @@ struct Dependency {
     asset_patterns: &'static [(Os, Arch, &'static str)],
     #[allow(dead_code)]
     strip_components: u32,
+    install_mode: InstallMode,
+    /// When set, download directly from this base URL instead of using the GitHub Releases API.
+    /// The final URL is `{direct_download_base}/{asset_pattern}`.
+    direct_download_base: Option<&'static str>,
 }
 
 static DEPENDENCIES: &[Dependency] = &[
@@ -44,6 +54,28 @@ static DEPENDENCIES: &[Dependency] = &[
             (Os::Windows, Arch::X86_64, "nvim-win64.zip"),
         ],
         strip_components: 2,
+        install_mode: InstallMode::SingleBinary,
+        direct_download_base: None,
+    },
+    Dependency {
+        name: "node",
+        github_repo: "nodejs/node",
+        version: "v22.16.0",
+        binary_name: "node",
+        asset_patterns: &[
+            (Os::Linux, Arch::X86_64, "node-v22.16.0-linux-x64.tar.gz"),
+            (Os::Linux, Arch::Aarch64, "node-v22.16.0-linux-arm64.tar.gz"),
+            (Os::MacOs, Arch::X86_64, "node-v22.16.0-darwin-x64.tar.gz"),
+            (
+                Os::MacOs,
+                Arch::Aarch64,
+                "node-v22.16.0-darwin-arm64.tar.gz",
+            ),
+            (Os::Windows, Arch::X86_64, "node-v22.16.0-win-x64.zip"),
+        ],
+        strip_components: 1,
+        install_mode: InstallMode::FullTree,
+        direct_download_base: Some("https://nodejs.org/dist/v22.16.0"),
     },
     Dependency {
         name: "ripgrep",
@@ -58,6 +90,8 @@ static DEPENDENCIES: &[Dependency] = &[
             (Os::Windows, Arch::X86_64, "x86_64-pc-windows-msvc.zip"),
         ],
         strip_components: 1,
+        install_mode: InstallMode::SingleBinary,
+        direct_download_base: None,
     },
     Dependency {
         name: "fd",
@@ -72,6 +106,8 @@ static DEPENDENCIES: &[Dependency] = &[
             (Os::Windows, Arch::X86_64, "x86_64-pc-windows-msvc.zip"),
         ],
         strip_components: 1,
+        install_mode: InstallMode::SingleBinary,
+        direct_download_base: None,
     },
     Dependency {
         name: "fzf",
@@ -86,6 +122,8 @@ static DEPENDENCIES: &[Dependency] = &[
             (Os::Windows, Arch::X86_64, "windows_amd64.zip"),
         ],
         strip_components: 0,
+        install_mode: InstallMode::SingleBinary,
+        direct_download_base: None,
     },
     Dependency {
         name: "tree-sitter",
@@ -100,6 +138,8 @@ static DEPENDENCIES: &[Dependency] = &[
             (Os::Windows, Arch::X86_64, "tree-sitter-cli-windows-x64.zip"),
         ],
         strip_components: 0,
+        install_mode: InstallMode::SingleBinary,
+        direct_download_base: None,
     },
 ];
 
@@ -150,6 +190,22 @@ fn find_asset_pattern(dep: &Dependency, os: Os, arch: Arch) -> Result<&'static s
         })
 }
 
+/// Try to find a GitHub token from environment or `gh` CLI.
+fn github_token() -> Option<String> {
+    std::env::var("GITHUB_TOKEN")
+        .or_else(|_| std::env::var("GH_TOKEN"))
+        .ok()
+        .or_else(|| {
+            Command::new("gh")
+                .args(["auth", "token"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .filter(|t| !t.is_empty())
+        })
+}
+
 /// Query the GitHub releases API for the download URL of a specific asset.
 fn resolve_download_url(
     github_repo: &str,
@@ -167,13 +223,19 @@ fn resolve_download_url(
         github_repo, version_path
     );
 
+    let mut curl_args = vec![
+        "-fsSL".to_string(),
+        "-H".to_string(),
+        "Accept: application/vnd.github.v3+json".to_string(),
+    ];
+    if let Some(token) = github_token() {
+        curl_args.push("-H".to_string());
+        curl_args.push(format!("Authorization: Bearer {}", token));
+    }
+    curl_args.push(api_url.clone());
+
     let output = Command::new("curl")
-        .args([
-            "-fsSL",
-            "-H",
-            "Accept: application/vnd.github.v3+json",
-            &api_url,
-        ])
+        .args(&curl_args)
         .output()
         .map_err(|e| format!("Failed to run curl: {}", e))?;
 
@@ -489,7 +551,12 @@ fn install_single_dep(
     manifest: &mut InstallManifest,
     env_name: &str,
 ) -> Result<(), String> {
-    let (url, tag) = resolve_download_url(dep.github_repo, dep.version, pattern)?;
+    let (url, tag) = if let Some(base) = dep.direct_download_base {
+        let url = format!("{}/{}", base, pattern);
+        (url, dep.version.to_string())
+    } else {
+        resolve_download_url(dep.github_repo, dep.version, pattern)?
+    };
     println!("      downloading: {}", url.dimmed());
 
     let archive_name = url.rsplit('/').next().unwrap_or("archive");
@@ -503,13 +570,34 @@ fn install_single_dep(
     println!("      extracting...");
     extract_archive(&archive_path, &extract_dir)?;
 
-    let binary_path = find_binary_in_dir(&extract_dir, dep.binary_name)?;
-    println!(
-        "      installing {} to {}",
-        dep.binary_name.bold(),
-        bin_dir.display().to_string().dimmed()
-    );
-    install_binary(&binary_path, bin_dir)?;
+    match dep.install_mode {
+        InstallMode::SingleBinary => {
+            let binary_path = find_binary_in_dir(&extract_dir, dep.binary_name)?;
+            println!(
+                "      installing {} to {}",
+                dep.binary_name.bold(),
+                bin_dir.display().to_string().dimmed()
+            );
+            install_binary(&binary_path, bin_dir)?;
+        }
+        InstallMode::FullTree => {
+            let target_dir = resolve_full_tree_dir(dep.name, env_name);
+            if target_dir.exists() {
+                fs::remove_dir_all(&target_dir)
+                    .map_err(|e| format!("Failed to remove old {}: {}", dep.name, e))?;
+            }
+            let tree_root = find_tree_root(&extract_dir, dep.binary_name)?;
+            if let Some(parent) = target_dir.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create parent dir: {}", e))?;
+            }
+            println!(
+                "      installing tree to {}",
+                target_dir.display().to_string().dimmed()
+            );
+            move_dir(&tree_root, &target_dir)?;
+        }
+    }
 
     if dep.name == "neovim" {
         if let Some(runtime_src) = find_nvim_runtime_dir(&extract_dir) {
@@ -536,6 +624,77 @@ fn install_single_dep(
     );
 
     Ok(())
+}
+
+/// Move a directory tree, preserving symlinks. Uses rename when possible,
+/// falls back to platform copy commands that preserve symlinks.
+fn move_dir(src: &Path, dst: &Path) -> Result<(), String> {
+    if fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+
+    #[cfg(unix)]
+    {
+        let status = Command::new("cp")
+            .args(["-a"])
+            .arg(src)
+            .arg(dst)
+            .status()
+            .map_err(|e| format!("Failed to run cp: {}", e))?;
+        if !status.success() {
+            return Err(format!("cp -a failed for {}", src.display()));
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    {
+        let status = Command::new("xcopy")
+            .arg(src)
+            .arg(dst)
+            .args(["/E", "/I", "/H", "/Q"])
+            .status()
+            .map_err(|e| format!("Failed to run xcopy: {}", e))?;
+        if !status.success() {
+            return Err(format!("xcopy failed for {}", src.display()));
+        }
+        Ok(())
+    }
+}
+
+/// Resolve the installation directory for a full-tree dependency.
+fn resolve_full_tree_dir(dep_name: &str, env_name: &str) -> PathBuf {
+    match dep_name {
+        "node" => env_node_dir(env_name),
+        _ => env_kv_data_dir(env_name).join(dep_name),
+    }
+}
+
+/// Find the root directory of an extracted full-tree dependency.
+/// For tarballs with a single top-level directory (e.g. `node-v22.16.0-darwin-arm64/`),
+/// returns that inner directory. Otherwise returns the extract dir itself.
+fn find_tree_root(extract_dir: &Path, binary_name: &str) -> Result<PathBuf, String> {
+    let entries: Vec<_> = fs::read_dir(extract_dir)
+        .map_err(|e| format!("Failed to read extract dir: {}", e))?
+        .filter_map(|e| e.ok())
+        .collect();
+
+    if entries.len() == 1 && entries[0].path().is_dir() {
+        let inner = entries[0].path();
+        if inner.join("bin").join(binary_name).exists() || inner.join("bin").exists() {
+            return Ok(inner);
+        }
+    }
+
+    if extract_dir.join("bin").join(binary_name).exists() {
+        return Ok(extract_dir.to_path_buf());
+    }
+
+    Err(format!(
+        "Could not locate tree root with bin/{} in {}",
+        binary_name,
+        extract_dir.display()
+    ))
 }
 
 #[cfg(test)]
@@ -571,6 +730,8 @@ mod tests {
             binary_name: "test",
             asset_patterns: &[],
             strip_components: 0,
+            install_mode: InstallMode::SingleBinary,
+            direct_download_base: None,
         };
         let pattern = find_asset_pattern(&dep, Os::Linux, Arch::X86_64);
         assert!(pattern.is_err());

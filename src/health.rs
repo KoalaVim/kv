@@ -1,4 +1,4 @@
-use crate::paths::env_bin_dir;
+use crate::paths::{env_bin_dir, env_node_dir};
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
 use std::process::Command;
@@ -21,6 +21,10 @@ fn find_binary(name: &str, env_name: &str) -> PathBuf {
     let env_path = env_bin_dir(env_name).join(name);
     if env_path.exists() {
         return env_path;
+    }
+    let node_path = env_node_dir(env_name).join("bin").join(name);
+    if node_path.exists() {
+        return node_path;
     }
     PathBuf::from(name)
 }
@@ -129,6 +133,39 @@ fn check_nerd_font(_env_name: &str) -> HealthResult {
     HealthResult::Missing("font detection not supported on this platform".to_string())
 }
 
+fn check_node(env_name: &str) -> HealthResult {
+    let bin = find_binary("node", env_name);
+    match Command::new(&bin).arg("--version").output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let version = stdout
+                .trim()
+                .strip_prefix('v')
+                .unwrap_or(stdout.trim())
+                .to_string();
+            HealthResult::Ok {
+                version,
+                detail: None,
+            }
+        }
+        Err(e) => HealthResult::Missing(e.to_string()),
+    }
+}
+
+fn check_npm(env_name: &str) -> HealthResult {
+    let bin = find_binary("npm", env_name);
+    match Command::new(&bin).arg("--version").output() {
+        Ok(output) => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            HealthResult::Ok {
+                version,
+                detail: None,
+            }
+        }
+        Err(e) => HealthResult::Missing(e.to_string()),
+    }
+}
+
 fn check_curl(_env_name: &str) -> HealthResult {
     match Command::new("curl").arg("--version").output() {
         Ok(output) => {
@@ -192,6 +229,16 @@ static HEALTH_CHECKS: &[HealthCheck] = &[
         name: "fzf",
         group: "dependencies",
         check: check_fzf,
+    },
+    HealthCheck {
+        name: "node",
+        group: "dependencies",
+        check: check_node,
+    },
+    HealthCheck {
+        name: "npm",
+        group: "dependencies",
+        check: check_npm,
     },
     HealthCheck {
         name: "curl",

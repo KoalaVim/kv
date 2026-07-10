@@ -130,6 +130,11 @@ pub fn env_nvim_runtime_dir(name: &str) -> PathBuf {
         .join("runtime")
 }
 
+/// Per-env Node.js installation directory (full runtime tree installed by `kv install`).
+pub fn env_node_dir(name: &str) -> PathBuf {
+    env_kv_data_dir(name).join("node")
+}
+
 /// User's lazy-lock.json for the given env.
 pub fn env_lockfile(name: &str) -> PathBuf {
     env_config_dir(name).join("lazy-lock.json")

@@ -1,7 +1,8 @@
 use crate::cli::Cli;
 use crate::env;
 use crate::paths::{
-    env_all_dirs, env_appname, env_bin_dir, env_config_dir, env_data_dir, env_nvim_runtime_dir,
+    env_all_dirs, env_appname, env_bin_dir, env_config_dir, env_data_dir, env_node_dir,
+    env_nvim_runtime_dir,
 };
 use chrono::Local;
 use std::ffi::OsString;
@@ -98,6 +99,13 @@ fn build_koala_env(
     if bin_dir.exists() {
         let current_path = std::env::var_os("PATH").unwrap_or_default();
         let mut new_path = OsString::from(&bin_dir);
+
+        let node_bin = env_node_dir(env_name).join("bin");
+        if node_bin.exists() {
+            new_path.push(":");
+            new_path.push(&node_bin);
+        }
+
         if !current_path.is_empty() {
             new_path.push(":");
             new_path.push(&current_path);
