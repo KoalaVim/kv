@@ -57,9 +57,12 @@ fn handle_subcommand(cli: &Cli, command: &Commands) -> Result<(), String> {
             let env_name = launcher::resolve_env_name_unchecked(cli)?;
             update::cmd_update(&env_name, target, remote, *force, *no_restore)?;
         }
-        Commands::Install { dry_run } => {
+        Commands::Install {
+            dry_run,
+            force_reinstall,
+        } => {
             let env_name = launcher::resolve_env_name_unchecked(cli)?;
-            install::cmd_install(&env_name, *dry_run)?;
+            install::cmd_install(&env_name, *dry_run, *force_reinstall)?;
         }
         Commands::Health => {
             let env_name = launcher::resolve_env_name_unchecked(cli)?;

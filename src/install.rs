@@ -456,7 +456,7 @@ fn write_manifest(env_name: &str, manifest: &InstallManifest) -> Result<(), Stri
     Ok(())
 }
 
-pub fn cmd_install(env_name: &str, dry_run: bool) -> Result<(), String> {
+pub fn cmd_install(env_name: &str, dry_run: bool, force_reinstall: bool) -> Result<(), String> {
     let os = detect_os()?;
     let arch = detect_arch()?;
     let bin_dir = env_bin_dir(env_name);
@@ -510,7 +510,23 @@ pub fn cmd_install(env_name: &str, dry_run: bool) -> Result<(), String> {
             continue;
         }
 
-        match install_single_dep(dep, pattern, &bin_dir, &tmp_dir, &mut manifest, env_name) {
+        let resolved = resolve_dep_version(dep, pattern)?;
+
+        if !force_reinstall {
+            if let Some(installed) = manifest.installed.get(dep.name) {
+                if installed.version == resolved.tag {
+                    println!(
+                        "  {} {} ({})",
+                        "OK".green().bold(),
+                        dep.name,
+                        "up to date".dimmed()
+                    );
+                    continue;
+                }
+            }
+        }
+
+        match install_single_dep(dep, &resolved, &bin_dir, &tmp_dir, &mut manifest, env_name) {
             Ok(()) => {
                 println!("  {} {}", "OK".green().bold(), dep.name);
             }
@@ -543,20 +559,33 @@ pub fn cmd_install(env_name: &str, dry_run: bool) -> Result<(), String> {
     }
 }
 
+struct ResolvedDep {
+    url: String,
+    tag: String,
+}
+
+fn resolve_dep_version(dep: &Dependency, pattern: &str) -> Result<ResolvedDep, String> {
+    if let Some(base) = dep.direct_download_base {
+        Ok(ResolvedDep {
+            url: format!("{}/{}", base, pattern),
+            tag: dep.version.to_string(),
+        })
+    } else {
+        let (url, tag) = resolve_download_url(dep.github_repo, dep.version, pattern)?;
+        Ok(ResolvedDep { url, tag })
+    }
+}
+
 fn install_single_dep(
     dep: &Dependency,
-    pattern: &str,
+    resolved: &ResolvedDep,
     bin_dir: &Path,
     tmp_dir: &Path,
     manifest: &mut InstallManifest,
     env_name: &str,
 ) -> Result<(), String> {
-    let (url, tag) = if let Some(base) = dep.direct_download_base {
-        let url = format!("{}/{}", base, pattern);
-        (url, dep.version.to_string())
-    } else {
-        resolve_download_url(dep.github_repo, dep.version, pattern)?
-    };
+    let url = &resolved.url;
+    let tag = &resolved.tag;
     println!("      downloading: {}", url.dimmed());
 
     let archive_name = url.rsplit('/').next().unwrap_or("archive");
@@ -564,7 +593,7 @@ fn install_single_dep(
     fs::create_dir_all(&dep_tmp).map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let archive_path = dep_tmp.join(archive_name);
 
-    download_file(&url, &archive_path)?;
+    download_file(url, &archive_path)?;
 
     let extract_dir = dep_tmp.join("extracted");
     println!("      extracting...");
@@ -617,8 +646,8 @@ fn install_single_dep(
     manifest.installed.insert(
         dep.name.to_string(),
         InstalledEntry {
-            version: tag,
-            asset_url: url,
+            version: tag.clone(),
+            asset_url: url.clone(),
             installed_at: chrono::Local::now().to_rfc3339(),
         },
     );

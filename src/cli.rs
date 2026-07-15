@@ -125,6 +125,9 @@ pub enum Commands {
         /// Show what would be done without making changes
         #[arg(long)]
         dry_run: bool,
+        /// Force reinstall even if versions match
+        #[arg(long)]
+        force_reinstall: bool,
     },
     /// Check health of KoalaVim dependencies
     Health,
@@ -490,8 +493,12 @@ mod tests {
     fn test_cli_install() {
         let cli = Cli::try_parse_from(["kv", "install"]).unwrap();
         match cli.command {
-            Some(Commands::Install { dry_run }) => {
+            Some(Commands::Install {
+                dry_run,
+                force_reinstall,
+            }) => {
                 assert!(!dry_run);
+                assert!(!force_reinstall);
             }
             _ => panic!("Expected Install subcommand"),
         }
@@ -501,8 +508,27 @@ mod tests {
     fn test_cli_install_dry_run() {
         let cli = Cli::try_parse_from(["kv", "install", "--dry-run"]).unwrap();
         match cli.command {
-            Some(Commands::Install { dry_run }) => {
+            Some(Commands::Install {
+                dry_run,
+                force_reinstall,
+            }) => {
                 assert!(dry_run);
+                assert!(!force_reinstall);
+            }
+            _ => panic!("Expected Install subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_install_force_reinstall() {
+        let cli = Cli::try_parse_from(["kv", "install", "--force-reinstall"]).unwrap();
+        match cli.command {
+            Some(Commands::Install {
+                dry_run,
+                force_reinstall,
+            }) => {
+                assert!(!dry_run);
+                assert!(force_reinstall);
             }
             _ => panic!("Expected Install subcommand"),
         }
