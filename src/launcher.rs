@@ -36,7 +36,12 @@ pub fn launch_nvim(cli: Cli) -> Result<(), String> {
 }
 
 pub fn resolve_env_name(cli: &Cli) -> Result<String, String> {
-    let env_name = cli.env.as_deref().unwrap_or("main");
+    let from_env_var = std::env::var("KV_ENV").ok();
+    let env_name = cli
+        .env
+        .as_deref()
+        .or(from_env_var.as_deref())
+        .unwrap_or("main");
     env::validate_env_name(env_name).map_err(|e| format!("Invalid env name: {}", e))?;
     let config_dir = env_config_dir(env_name);
     if !config_dir.exists() {
@@ -64,7 +69,12 @@ pub fn resolve_env_name(cli: &Cli) -> Result<String, String> {
 
 /// Resolve the env name from CLI, defaulting to "main". Does not check existence.
 pub fn resolve_env_name_unchecked(cli: &Cli) -> Result<String, String> {
-    let env_name = cli.env.as_deref().unwrap_or("main");
+    let from_env_var = std::env::var("KV_ENV").ok();
+    let env_name = cli
+        .env
+        .as_deref()
+        .or(from_env_var.as_deref())
+        .unwrap_or("main");
     env::validate_env_name(env_name).map_err(|e| format!("Invalid env name: {}", e))?;
     Ok(env_name.to_string())
 }
@@ -224,6 +234,7 @@ pub fn tilde_shorten(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     #[test]
     fn test_join_args_separates_with_space() {
@@ -255,5 +266,31 @@ mod tests {
     fn test_tilde_shorten_no_home() {
         let path = std::path::PathBuf::from("/tmp/foo");
         assert_eq!(tilde_shorten(&path), "/tmp/foo");
+    }
+
+    #[test]
+    fn test_resolve_env_name_unchecked_cli_flag_wins() {
+        let cli = Cli::try_parse_from(["kv", "--env", "from-flag"]).unwrap();
+        std::env::set_var("KV_ENV", "from-envvar");
+        let result = resolve_env_name_unchecked(&cli).unwrap();
+        std::env::remove_var("KV_ENV");
+        assert_eq!(result, "from-flag");
+    }
+
+    #[test]
+    fn test_resolve_env_name_unchecked_reads_kv_env() {
+        let cli = Cli::try_parse_from(["kv"]).unwrap();
+        std::env::set_var("KV_ENV", "from-envvar");
+        let result = resolve_env_name_unchecked(&cli).unwrap();
+        std::env::remove_var("KV_ENV");
+        assert_eq!(result, "from-envvar");
+    }
+
+    #[test]
+    fn test_resolve_env_name_unchecked_defaults_to_main() {
+        let cli = Cli::try_parse_from(["kv"]).unwrap();
+        std::env::remove_var("KV_ENV");
+        let result = resolve_env_name_unchecked(&cli).unwrap();
+        assert_eq!(result, "main");
     }
 }

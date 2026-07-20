@@ -170,6 +170,11 @@ pub enum EnvAction {
         /// New env name
         new_name: String,
     },
+    /// Print the KoalaVim directory path for an env
+    Path {
+        /// Name of the env
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

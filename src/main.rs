@@ -32,8 +32,11 @@ fn run(cli: Cli) -> Result<(), String> {
 fn handle_subcommand(cli: &Cli, command: &Commands) -> Result<(), String> {
     match command {
         Commands::Init { env } => {
-            let name = env.as_deref().unwrap_or("main");
-            cmd_env_init(name)?;
+            let name = match env.as_deref() {
+                Some(n) => n.to_string(),
+                None => launcher::resolve_env_name_unchecked(cli)?,
+            };
+            cmd_env_init(&name)?;
         }
         Commands::Completions { shell } => {
             let mut buf = Vec::new();
@@ -88,6 +91,10 @@ fn handle_env_action(action: &EnvAction) -> Result<(), String> {
         }
         EnvAction::Rename { current, new_name } => {
             env::cmd_env_rename(current, new_name)?;
+        }
+        EnvAction::Path { name } => {
+            let kvim_dir = paths::env_kvim_dir(name);
+            println!("{}", kvim_dir.display());
         }
     }
     Ok(())
