@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 pub fn launch_nvim(cli: Cli) -> Result<(), String> {
+    raise_nofile_limit();
+
     let env_name = resolve_env_name(&cli)?;
     let appname = env_appname(&env_name);
     let koala_mode = resolve_koala_mode(&cli)?;
@@ -220,6 +222,28 @@ fn run_kvim(env: &[(OsString, OsString)], params: &[OsString]) -> Result<(), Str
     }
     Ok(())
 }
+
+/// Raise the open-file-descriptor soft limit to the hard limit.
+/// Neovim plugin managers (lazy.nvim) spawn many concurrent git processes,
+/// each consuming multiple FDs. The default macOS soft limit (256) is too low.
+#[cfg(unix)]
+fn raise_nofile_limit() {
+    unsafe {
+        let mut rlim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) == 0
+            && rlim.rlim_cur < rlim.rlim_max
+        {
+            rlim.rlim_cur = rlim.rlim_max;
+            libc::setrlimit(libc::RLIMIT_NOFILE, &rlim);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn raise_nofile_limit() {}
 
 pub fn tilde_shorten(path: &std::path::Path) -> String {
     let s = path.display().to_string();
