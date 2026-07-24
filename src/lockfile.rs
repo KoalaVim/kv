@@ -146,8 +146,13 @@ pub fn lazy_restore(env_name: &str) -> Result<(), String> {
 
     let bin_dir = env_bin_dir(env_name);
     let nvim_bin = bin_dir.join("nvim");
-    let nvim_cmd = if nvim_bin.exists() {
-        nvim_bin.into_os_string()
+    let nvim_bin_exe = bin_dir.join("nvim.exe");
+    let nvim_cmd = if nvim_bin.exists() || nvim_bin_exe.exists() {
+        if nvim_bin_exe.exists() {
+            nvim_bin_exe.into_os_string()
+        } else {
+            nvim_bin.into_os_string()
+        }
     } else {
         "nvim".into()
     };
