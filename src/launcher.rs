@@ -113,10 +113,14 @@ fn build_koala_env(
         let mut new_path = OsString::from(&bin_dir);
         let path_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
 
-        let node_bin = env_node_dir(env_name).join("bin");
+        let node_dir = env_node_dir(env_name);
+        let node_bin = node_dir.join("bin");
         if node_bin.exists() {
             new_path.push(path_sep);
             new_path.push(&node_bin);
+        } else if node_dir.exists() {
+            new_path.push(path_sep);
+            new_path.push(&node_dir);
         }
 
         if !current_path.is_empty() {
