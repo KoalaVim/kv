@@ -106,7 +106,7 @@ fn backup_lockfile(env_name: &str) -> Result<(), String> {
     fs::create_dir_all(&kv_data).map_err(|e| format!("Failed to create kv data dir: {}", e))?;
 
     let now = Local::now();
-    let backup_name = format!("lazy-lock-{}.json.backup", now.format("%d-%m-%y_%H:%M:%S"));
+    let backup_name = format!("lazy-lock-{}.json.backup", now.format("%d-%m-%y_%H-%M-%S"));
     let backup_path = kv_data.join(&backup_name);
 
     eprintln!(

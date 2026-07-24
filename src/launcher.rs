@@ -141,7 +141,7 @@ fn build_koala_env(
             debug_file.push(file_name);
         } else {
             let now = Local::now();
-            debug_file.push(now.format("%Y-%m-%d_%H:%M:%S").to_string());
+            debug_file.push(now.format("%Y-%m-%d_%H-%M-%S").to_string());
         }
 
         koala_env.push(("KOALA_DEBUG_OUT".into(), debug_file.into()));
