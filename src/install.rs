@@ -723,17 +723,29 @@ fn find_tree_root(extract_dir: &Path, binary_name: &str) -> Result<PathBuf, Stri
         if inner.join("bin").join(binary_name).exists() || inner.join("bin").exists() {
             return Ok(inner);
         }
+        if has_binary_in(&inner, binary_name) {
+            return Ok(inner);
+        }
     }
 
     if extract_dir.join("bin").join(binary_name).exists() {
         return Ok(extract_dir.to_path_buf());
     }
 
+    if has_binary_in(extract_dir, binary_name) {
+        return Ok(extract_dir.to_path_buf());
+    }
+
     Err(format!(
-        "Could not locate tree root with bin/{} in {}",
+        "Could not locate tree root with {} in {}",
         binary_name,
         extract_dir.display()
     ))
+}
+
+fn has_binary_in(dir: &Path, binary_name: &str) -> bool {
+    dir.join(binary_name).exists()
+        || dir.join(format!("{}.exe", binary_name)).exists()
 }
 
 #[cfg(test)]
