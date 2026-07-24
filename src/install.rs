@@ -436,6 +436,23 @@ fn install_binary(src: &Path, bin_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn install_sibling_dlls(src_dir: &Path, bin_dir: &Path) -> Result<(), String> {
+    let entries = fs::read_dir(src_dir).map_err(|e| format!("Failed to read dir: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext.eq_ignore_ascii_case("dll") {
+                    let dest = bin_dir.join(entry.file_name());
+                    fs::copy(&path, &dest)
+                        .map_err(|e| format!("Failed to copy DLL: {}", e))?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Re-sign binary with a local ad-hoc signature so macOS Gatekeeper allows execution.
 /// The provenance xattr on newer macOS is irremovable, but a fresh local signature overrides it.
 #[cfg(target_os = "macos")]
@@ -618,6 +635,11 @@ fn install_single_dep(
                 bin_dir.display().to_string().dimmed()
             );
             install_binary(&binary_path, bin_dir)?;
+            if cfg!(target_os = "windows") {
+                if let Some(bin_parent) = binary_path.parent() {
+                    install_sibling_dlls(bin_parent, bin_dir)?;
+                }
+            }
         }
         InstallMode::FullTree => {
             let target_dir = resolve_full_tree_dir(dep.name, env_name);
