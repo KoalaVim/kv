@@ -111,15 +111,16 @@ fn build_koala_env(
     if bin_dir.exists() {
         let current_path = std::env::var_os("PATH").unwrap_or_default();
         let mut new_path = OsString::from(&bin_dir);
+        let path_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
 
         let node_bin = env_node_dir(env_name).join("bin");
         if node_bin.exists() {
-            new_path.push(":");
+            new_path.push(path_sep);
             new_path.push(&node_bin);
         }
 
         if !current_path.is_empty() {
-            new_path.push(":");
+            new_path.push(path_sep);
             new_path.push(&current_path);
         }
         koala_env.push(("PATH".into(), new_path));
