@@ -311,15 +311,25 @@ fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
             return Err("tar extraction failed".to_string());
         }
     } else if archive_str.ends_with(".zip") {
-        let status = Command::new("unzip")
-            .args(["-q", "-o"])
-            .arg(archive)
-            .arg("-d")
-            .arg(dest)
-            .status()
-            .map_err(|e| format!("Failed to run unzip: {}", e))?;
+        let status = if cfg!(target_os = "windows") {
+            Command::new("tar")
+                .args(["xf"])
+                .arg(archive)
+                .arg("-C")
+                .arg(dest)
+                .status()
+                .map_err(|e| format!("Failed to run tar: {}", e))?
+        } else {
+            Command::new("unzip")
+                .args(["-q", "-o"])
+                .arg(archive)
+                .arg("-d")
+                .arg(dest)
+                .status()
+                .map_err(|e| format!("Failed to run unzip: {}", e))?
+        };
         if !status.success() {
-            return Err("unzip extraction failed".to_string());
+            return Err("zip extraction failed".to_string());
         }
     } else {
         return Err(format!("Unknown archive format: {}", archive_str));
