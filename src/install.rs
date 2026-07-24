@@ -311,15 +311,25 @@ fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
             return Err("tar extraction failed".to_string());
         }
     } else if archive_str.ends_with(".zip") {
-        let status = Command::new("unzip")
-            .args(["-q", "-o"])
-            .arg(archive)
-            .arg("-d")
-            .arg(dest)
-            .status()
-            .map_err(|e| format!("Failed to run unzip: {}", e))?;
+        let status = if cfg!(target_os = "windows") {
+            Command::new("tar")
+                .args(["xf"])
+                .arg(archive)
+                .arg("-C")
+                .arg(dest)
+                .status()
+                .map_err(|e| format!("Failed to run tar: {}", e))?
+        } else {
+            Command::new("unzip")
+                .args(["-q", "-o"])
+                .arg(archive)
+                .arg("-d")
+                .arg(dest)
+                .status()
+                .map_err(|e| format!("Failed to run unzip: {}", e))?
+        };
         if !status.success() {
-            return Err("unzip extraction failed".to_string());
+            return Err("zip extraction failed".to_string());
         }
     } else {
         return Err(format!("Unknown archive format: {}", archive_str));
@@ -423,6 +433,23 @@ fn install_binary(src: &Path, bin_dir: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     codesign_adhoc(&dest);
 
+    Ok(())
+}
+
+fn install_sibling_dlls(src_dir: &Path, bin_dir: &Path) -> Result<(), String> {
+    let entries = fs::read_dir(src_dir).map_err(|e| format!("Failed to read dir: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext.eq_ignore_ascii_case("dll") {
+                    let dest = bin_dir.join(entry.file_name());
+                    fs::copy(&path, &dest)
+                        .map_err(|e| format!("Failed to copy DLL: {}", e))?;
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -608,6 +635,11 @@ fn install_single_dep(
                 bin_dir.display().to_string().dimmed()
             );
             install_binary(&binary_path, bin_dir)?;
+            if cfg!(target_os = "windows") {
+                if let Some(bin_parent) = binary_path.parent() {
+                    install_sibling_dlls(bin_parent, bin_dir)?;
+                }
+            }
         }
         InstallMode::FullTree => {
             let target_dir = resolve_full_tree_dir(dep.name, env_name);
@@ -713,17 +745,29 @@ fn find_tree_root(extract_dir: &Path, binary_name: &str) -> Result<PathBuf, Stri
         if inner.join("bin").join(binary_name).exists() || inner.join("bin").exists() {
             return Ok(inner);
         }
+        if has_binary_in(&inner, binary_name) {
+            return Ok(inner);
+        }
     }
 
     if extract_dir.join("bin").join(binary_name).exists() {
         return Ok(extract_dir.to_path_buf());
     }
 
+    if has_binary_in(extract_dir, binary_name) {
+        return Ok(extract_dir.to_path_buf());
+    }
+
     Err(format!(
-        "Could not locate tree root with bin/{} in {}",
+        "Could not locate tree root with {} in {}",
         binary_name,
         extract_dir.display()
     ))
+}
+
+fn has_binary_in(dir: &Path, binary_name: &str) -> bool {
+    dir.join(binary_name).exists()
+        || dir.join(format!("{}.exe", binary_name)).exists()
 }
 
 #[cfg(test)]
