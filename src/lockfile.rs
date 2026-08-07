@@ -1,11 +1,14 @@
-use crate::paths::{env_appname, env_bin_dir, env_lockfile, env_nvim_runtime_dir, kvim_lockfile};
+use crate::paths::{
+    env_appname, env_bin_dir, env_lazy_dir, env_lockfile, env_nvim_runtime_dir, kvim_lockfile,
+};
 use inquire::Confirm;
 use owo_colors::OwoColorize;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 
 type PluginMap = BTreeMap<String, Value>;
 
@@ -134,41 +137,84 @@ pub fn overwrite_lockfile(env_name: &str) -> Result<(), String> {
     write_lockfile(&user_path, &kvim_lock)
 }
 
-/// Run `:Lazy restore` via headless nvim for the given env.
-pub fn lazy_restore(env_name: &str) -> Result<(), String> {
-    let appname = env_appname(env_name);
-
-    eprintln!(
-        "\n {} Running {} (sync plugin versions according to lockfile)",
-        ">>".yellow().bold(),
-        ":Lazy restore".bold(),
-    );
-
+/// Resolve the nvim binary for an env, preferring the kv-managed one.
+fn resolve_nvim(env_name: &str) -> OsString {
     let bin_dir = env_bin_dir(env_name);
     let nvim_bin = bin_dir.join("nvim");
     let nvim_bin_exe = bin_dir.join("nvim.exe");
-    let nvim_cmd = if nvim_bin.exists() || nvim_bin_exe.exists() {
-        if nvim_bin_exe.exists() {
-            nvim_bin_exe.into_os_string()
-        } else {
-            nvim_bin.into_os_string()
-        }
+
+    if nvim_bin_exe.exists() {
+        nvim_bin_exe.into_os_string()
+    } else if nvim_bin.exists() {
+        nvim_bin.into_os_string()
     } else {
         "nvim".into()
-    };
+    }
+}
 
-    let mut cmd = Command::new(&nvim_cmd);
-    cmd.args(["--headless", "+LazyRestoreLogged", "+qa"])
-        .env("NVIM_APPNAME", &appname);
+/// Run headless nvim for the given env, capturing its output.
+fn run_nvim(nvim_cmd: &OsString, env_name: &str, args: &[&str]) -> Result<Output, String> {
+    let mut cmd = Command::new(nvim_cmd);
+    cmd.args(args).env("NVIM_APPNAME", env_appname(env_name));
 
     let runtime_dir = env_nvim_runtime_dir(env_name);
     if runtime_dir.exists() {
         cmd.env("VIMRUNTIME", &runtime_dir);
     }
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("Failed to run nvim for lazy restore: {}", e))?;
+    cmd.output()
+        .map_err(|e| format!("Failed to run nvim: {}", e))
+}
+
+/// Sync plugin versions to KoalaVim's lockfile via headless nvim.
+///
+/// This runs in two phases on purpose. lazy.nvim installs missing plugins during
+/// startup, and that install ends by rewriting the lockfile — and its in-memory
+/// copy of it — from whatever each plugin is currently checked out to. Any
+/// restore in that same session then reads those stale commits back, concludes
+/// every plugin is already at its target, and skips every checkout silently.
+///
+/// Splitting the work sidesteps that entirely:
+///   1. A plain startup lets lazy install anything missing and settle. New
+///      clones land on the right commit (the lockfile is still correct when it
+///      reads it); the trailing rewrite is expected and discarded.
+///   2. Re-assert the lockfile, then restore. Nothing is missing now, so the
+///      install path never runs and the lockfile cache stays trustworthy.
+///
+/// The verification pass afterwards is not part of the workaround — it exists
+/// because a skipped checkout produces no task error, so lazy reporting
+/// "success" is not on its own evidence that anything moved.
+pub fn lazy_restore(env_name: &str) -> Result<(), String> {
+    let nvim_cmd = resolve_nvim(env_name);
+
+    // Phase 1: let lazy install any missing plugins and settle.
+    eprintln!(
+        "\n {} Installing missing plugins (if any)",
+        ">>".yellow().bold(),
+    );
+    let output = run_nvim(&nvim_cmd, env_name, &["--headless", "+qa"])?;
+    if !output.status.success() {
+        eprintln!(
+            "{} Plugin install phase exited with {}:\n{}",
+            "warning:".yellow().bold(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim(),
+        );
+    }
+
+    // Phase 2: re-assert the lockfile (phase 1 rewrote it), then restore.
+    overwrite_lockfile(env_name)?;
+
+    eprintln!(
+        " {} Running {} (sync plugin versions according to lockfile)",
+        ">>".yellow().bold(),
+        ":Lazy restore".bold(),
+    );
+    let output = run_nvim(
+        &nvim_cmd,
+        env_name,
+        &["--headless", "+LazyRestoreLogged", "+qa"],
+    )?;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -178,34 +224,189 @@ pub fn lazy_restore(env_name: &str) -> Result<(), String> {
         .find(|l| l.starts_with('{'))
         .unwrap_or("")
         .trim();
-    let result: Result<Value, _> = serde_json::from_str(json_str);
-    match result {
-        Ok(val) => {
-            if let Some(plugins) = val.get("plugins").and_then(|p| p.as_object()) {
-                if !plugins.is_empty() {
-                    let label = ":Lazy restore";
-                    eprintln!("{} {} finished with errors:", "error:".red().bold(), label);
-                    for (plugin, error) in plugins {
-                        eprintln!("  {}: {}", plugin.bold(), error);
-                    }
-                    return Err(":Lazy restore had plugin errors".to_string());
-                }
+    let val: Value = serde_json::from_str(json_str).map_err(|_| {
+        eprintln!(
+            "{} Failed to decode lazy restore output: {}",
+            "error:".red().bold(),
+            stderr
+        );
+        "Failed to parse :Lazy restore output".to_string()
+    })?;
+
+    if let Some(plugins) = val.get("plugins").and_then(|p| p.as_object()) {
+        if !plugins.is_empty() {
+            eprintln!(
+                "{} :Lazy restore finished with errors:",
+                "error:".red().bold()
+            );
+            for (plugin, error) in plugins {
+                eprintln!("  {}: {}", plugin.bold(), error);
             }
-            eprintln!(
-                " {} Finished successfully. Restart nvim to take effect.",
-                ">>".green().bold()
-            );
-            Ok(())
-        }
-        Err(_) => {
-            eprintln!(
-                "{} Failed to decode lazy restore output: {}",
-                "error:".red().bold(),
-                stderr
-            );
-            Err("Failed to parse :Lazy restore output".to_string())
+            return Err(":Lazy restore had plugin errors".to_string());
         }
     }
+
+    verify_restore(env_name)?;
+
+    eprintln!(
+        " {} Finished successfully. Restart nvim to take effect.",
+        ">>".green().bold()
+    );
+    Ok(())
+}
+
+/// A plugin left checked out at a commit other than the one KoalaVim pins.
+#[derive(Debug, PartialEq, Eq)]
+struct Drift {
+    plugin: String,
+    expected: String,
+    actual: String,
+}
+
+/// Compare two commit hashes, tolerating one being an abbreviation of the other.
+fn commit_eq(a: &str, b: &str) -> bool {
+    let n = a.len().min(b.len());
+    n >= 7 && a[..n].eq_ignore_ascii_case(&b[..n])
+}
+
+/// Check every pinned plugin against its actual checked-out commit.
+///
+/// `head_of` resolves a plugin name to its current HEAD, or `None` when the
+/// plugin isn't on disk. Returns drifted plugins and uninstalled plugin names.
+fn collect_drift<F>(kvim_lock: &PluginMap, head_of: F) -> (Vec<Drift>, Vec<String>)
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let mut drifted = Vec::new();
+    let mut missing = Vec::new();
+
+    for (plugin, value) in kvim_lock {
+        if plugin == "KoalaVim" {
+            continue;
+        }
+        let Some(expected) = plugin_commit(value) else {
+            continue;
+        };
+        match head_of(plugin) {
+            Some(actual) if !commit_eq(&actual, expected) => drifted.push(Drift {
+                plugin: plugin.clone(),
+                expected: expected.to_string(),
+                actual,
+            }),
+            Some(_) => {}
+            None => missing.push(plugin.clone()),
+        }
+    }
+
+    (drifted, missing)
+}
+
+/// Files with uncommitted local modifications in a plugin checkout.
+///
+/// lazy.nvim refuses to move a dirty repo: its `git.status` task raises an
+/// error, which halts the rest of that plugin's pipeline before `git.checkout`
+/// ever runs. This is the most common reason a plugin silently fails to restore.
+fn local_changes(plugin_dir: &Path) -> Vec<String> {
+    let Ok(output) = Command::new("git")
+        .args(["ls-files", "-d", "-m"])
+        .current_dir(plugin_dir)
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        // lazy self-heals this one rather than erroring on it
+        .filter(|l| !l.is_empty() && l.replace('\\', "/") != "doc/tags")
+        .map(str::to_string)
+        .collect()
+}
+
+/// Resolve a plugin's checked-out commit, or `None` if it isn't a git checkout.
+fn git_head(plugin_dir: &Path) -> Option<String> {
+    if !plugin_dir.exists() {
+        return None;
+    }
+    let output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(plugin_dir)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!commit.is_empty()).then_some(commit)
+}
+
+/// Verify plugins are actually checked out where KoalaVim's lockfile pins them.
+///
+/// This is the only reliable signal that a restore did anything: a plugin whose
+/// pipeline halts early produces no task error, so a clean `:Lazy restore`
+/// result is not on its own evidence that plugins moved.
+///
+/// Uninstalled plugins are reported as a note, not an error — KoalaVim's
+/// lockfile keeps entries for plugins the user has disabled, and those
+/// legitimately have no directory on disk.
+fn verify_restore(env_name: &str) -> Result<(), String> {
+    let kvim_lock = read_lockfile(&kvim_lockfile(env_name))?;
+    let lazy_dir = env_lazy_dir(env_name);
+
+    let (drifted, missing) = collect_drift(&kvim_lock, |plugin| git_head(&lazy_dir.join(plugin)));
+
+    if !missing.is_empty() {
+        eprintln!(
+            " {} {} pinned plugin(s) not installed (expected if disabled in your config): {}",
+            "--".dimmed(),
+            missing.len(),
+            missing.join(", ").dimmed()
+        );
+    }
+
+    if drifted.is_empty() {
+        return Ok(());
+    }
+
+    eprintln!(
+        "{} {} plugin(s) were not restored to their pinned commit:",
+        "error:".red().bold(),
+        drifted.len()
+    );
+
+    let mut dirty_seen = false;
+    for d in &drifted {
+        let short = |c: &str| c[..c.len().min(12)].to_string();
+        eprintln!(
+            "  {:<32} {} (expected {})",
+            d.plugin.bold(),
+            short(&d.actual).red(),
+            short(&d.expected).cyan()
+        );
+
+        let changes = local_changes(&lazy_dir.join(&d.plugin));
+        if !changes.is_empty() {
+            dirty_seen = true;
+            eprintln!("  {:<32} {}", "", "has uncommitted local changes:".yellow());
+            for file in &changes {
+                eprintln!("  {:<32}   {}", "", file.dimmed());
+            }
+        }
+    }
+
+    if dirty_seen {
+        eprintln!(
+            "\n{} lazy.nvim refuses to update a plugin with local changes, and stops\n\
+             that plugin's pipeline before the checkout runs. Commit, stash, or discard\n\
+             the changes above, then re-run the update.",
+            "note:".bold()
+        );
+    }
+
+    Err(format!(
+        "{} plugin(s) not restored to their pinned commit",
+        drifted.len()
+    ))
 }
 
 #[cfg(test)]
@@ -290,5 +491,104 @@ mod tests {
 
         let no_commit = serde_json::json!({"branch": "main"});
         assert_eq!(plugin_commit(&no_commit), None);
+    }
+
+    fn lock_of(entries: &[(&str, &str)]) -> PluginMap {
+        entries
+            .iter()
+            .map(|(name, commit)| {
+                (
+                    name.to_string(),
+                    serde_json::json!({ "commit": commit, "branch": "main" }),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_commit_eq() {
+        let full = "d08fd3b921be36be360b15369b78ded602ce9b61";
+        assert!(commit_eq(full, full));
+        assert!(commit_eq(full, "d08fd3b"));
+        assert!(commit_eq("d08fd3b", full));
+        assert!(commit_eq(full, &full.to_uppercase()));
+
+        assert!(!commit_eq(full, "dc804c8ac0c663bcd8d5bbbdb350bea5dde36890"));
+        // too short to be a meaningful comparison
+        assert!(!commit_eq(full, "d08fd"));
+        assert!(!commit_eq("", ""));
+    }
+
+    #[test]
+    fn test_collect_drift_in_sync() {
+        let lock = lock_of(&[("plugin-a", "aaa1111"), ("plugin-b", "bbb2222")]);
+        let (drifted, missing) = collect_drift(&lock, |name| match name {
+            "plugin-a" => Some("aaa1111".to_string()),
+            "plugin-b" => Some("bbb2222".to_string()),
+            _ => None,
+        });
+        assert!(drifted.is_empty());
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn test_collect_drift_detects_stale_checkout() {
+        // The regression this guards: user lockfile and on-disk agree with each
+        // other but both lag KoalaVim, because the checkout was skipped.
+        let kvim = lock_of(&[("codediff.nvim", "dc804c8ac0c663bcd8d5bbbdb350bea5dde36890")]);
+        let (drifted, missing) = collect_drift(&kvim, |_| {
+            Some("d08fd3b921be36be360b15369b78ded602ce9b61".to_string())
+        });
+
+        assert!(missing.is_empty());
+        assert_eq!(
+            drifted,
+            vec![Drift {
+                plugin: "codediff.nvim".to_string(),
+                expected: "dc804c8ac0c663bcd8d5bbbdb350bea5dde36890".to_string(),
+                actual: "d08fd3b921be36be360b15369b78ded602ce9b61".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_collect_drift_reports_uninstalled_separately() {
+        let lock = lock_of(&[("installed", "aaa1111"), ("absent", "bbb2222")]);
+        let (drifted, missing) = collect_drift(&lock, |name| {
+            (name == "installed").then(|| "aaa1111".to_string())
+        });
+
+        assert!(drifted.is_empty());
+        assert_eq!(missing, vec!["absent".to_string()]);
+    }
+
+    #[test]
+    fn test_collect_drift_skips_koalavim_entry() {
+        let lock = lock_of(&[("KoalaVim", "fff0000"), ("plugin-a", "aaa1111")]);
+        let (drifted, missing) = collect_drift(&lock, |name| {
+            (name == "plugin-a").then(|| "aaa1111".to_string())
+        });
+
+        assert!(drifted.is_empty(), "KoalaVim must never be verified");
+        assert!(missing.is_empty(), "KoalaVim must never be verified");
+    }
+
+    #[test]
+    fn test_collect_drift_ignores_entries_without_commit() {
+        let mut lock = PluginMap::new();
+        lock.insert(
+            "no-commit".to_string(),
+            serde_json::json!({ "branch": "main" }),
+        );
+        let (drifted, missing) = collect_drift(&lock, |_| None);
+        assert!(drifted.is_empty());
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn test_git_head_on_non_repo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert_eq!(git_head(&tmp.path().join("nope")), None);
+        assert_eq!(git_head(tmp.path()), None);
     }
 }

@@ -107,7 +107,6 @@ pub fn env_kvim_dir(name: &str) -> PathBuf {
 }
 
 /// Root directory for lazy.nvim plugins.
-#[allow(dead_code)]
 pub fn env_lazy_dir(name: &str) -> PathBuf {
     env_data_dir(name).join("lazy")
 }
