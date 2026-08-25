@@ -122,8 +122,7 @@ pub fn cmd_env_init(name: &str) -> Result<PathBuf, String> {
     match selection {
         "Clean (empty config)" => cmd_env_create(name, None, None),
         "Copy from existing config directory" => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            let default_path = format!("{}/.config/nvim", home);
+            let default_path = default_nvim_config_dir().display().to_string();
             let path = Text::new("Path to config directory:")
                 .with_default(&default_path)
                 .prompt()

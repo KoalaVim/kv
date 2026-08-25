@@ -252,7 +252,8 @@ fn raise_nofile_limit() {}
 
 pub fn tilde_shorten(path: &std::path::Path) -> String {
     let s = path.display().to_string();
-    if let Ok(home) = std::env::var("HOME") {
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"));
+    if let Ok(home) = home {
         if let Some(rest) = s.strip_prefix(&home) {
             return format!("~{}", rest);
         }
@@ -285,9 +286,12 @@ mod tests {
 
     #[test]
     fn test_tilde_shorten() {
-        if let Ok(home) = std::env::var("HOME") {
-            let path = std::path::PathBuf::from(&home).join("foo/bar");
-            assert_eq!(tilde_shorten(&path), "~/foo/bar");
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"));
+        if let Ok(home) = home {
+            let path = std::path::PathBuf::from(&home).join("foo").join("bar");
+            let shortened = tilde_shorten(&path);
+            let sep = std::path::MAIN_SEPARATOR;
+            assert_eq!(shortened, format!("~{sep}foo{sep}bar"));
         }
     }
 

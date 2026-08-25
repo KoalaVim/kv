@@ -9,7 +9,9 @@ fn default_debug_dir() -> PathBuf {
 }
 
 fn default_kvim_conf() -> PathBuf {
-    let home = env::var("HOME").unwrap_or_else(|_| String::from("/tmp"));
+    let home = env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_else(|_| String::from("/tmp"));
     PathBuf::from(home).join(".kvim.conf")
 }
 

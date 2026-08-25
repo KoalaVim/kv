@@ -60,6 +60,12 @@ pub fn envs_config_root() -> PathBuf {
     nvim_base_dir("XDG_CONFIG_HOME", ".config").join(ENV_PREFIX)
 }
 
+/// The default nvim config directory (e.g. `~/.config/nvim` on Unix,
+/// `$LOCALAPPDATA/nvim` on Windows).
+pub fn default_nvim_config_dir() -> PathBuf {
+    nvim_base_dir("XDG_CONFIG_HOME", ".config").join("nvim")
+}
+
 pub fn env_config_dir(name: &str) -> PathBuf {
     nvim_base_dir("XDG_CONFIG_HOME", ".config")
         .join(ENV_PREFIX)
@@ -175,10 +181,33 @@ mod tests {
         env::set_var("XDG_STATE_HOME", base.join("state"));
         env::set_var("XDG_CACHE_HOME", base.join("cache"));
 
-        assert_eq!(env_config_dir("myenv"), base.join("config/kvim-envs/myenv"));
-        assert_eq!(env_data_dir("myenv"), base.join("data/kvim-envs/myenv"));
-        assert_eq!(env_state_dir("myenv"), base.join("state/kvim-envs/myenv"));
-        assert_eq!(env_cache_dir("myenv"), base.join("cache/kvim-envs/myenv"));
+        assert_eq!(
+            env_config_dir("myenv"),
+            base.join("config").join("kvim-envs").join("myenv")
+        );
+        if cfg!(windows) {
+            assert_eq!(
+                env_data_dir("myenv"),
+                base.join("data").join("kvim-envs").join("myenv-data")
+            );
+            assert_eq!(
+                env_state_dir("myenv"),
+                base.join("state").join("kvim-envs").join("myenv-data")
+            );
+        } else {
+            assert_eq!(
+                env_data_dir("myenv"),
+                base.join("data").join("kvim-envs").join("myenv")
+            );
+            assert_eq!(
+                env_state_dir("myenv"),
+                base.join("state").join("kvim-envs").join("myenv")
+            );
+        }
+        assert_eq!(
+            env_cache_dir("myenv"),
+            base.join("cache").join("kvim-envs").join("myenv")
+        );
 
         env::remove_var("XDG_CONFIG_HOME");
         env::remove_var("XDG_DATA_HOME");
@@ -196,29 +225,24 @@ mod tests {
         env::set_var("XDG_STATE_HOME", base.join("state"));
         env::set_var("XDG_CACHE_HOME", base.join("cache"));
 
-        assert_eq!(
-            env_kvim_dir("myenv"),
-            base.join("data/kvim-envs/myenv/lazy/KoalaVim")
-        );
-        assert_eq!(
-            env_lazy_dir("myenv"),
-            base.join("data/kvim-envs/myenv/lazy")
-        );
-        assert_eq!(
-            env_bin_dir("myenv"),
-            base.join("data/kvim-envs/myenv/kv/bin")
-        );
-        assert_eq!(
-            env_kv_data_dir("myenv"),
-            base.join("data/kvim-envs/myenv/kv")
-        );
+        let data_env = env_data_dir("myenv");
+        assert_eq!(env_kvim_dir("myenv"), data_env.join("lazy").join("KoalaVim"));
+        assert_eq!(env_lazy_dir("myenv"), data_env.join("lazy"));
+        assert_eq!(env_bin_dir("myenv"), data_env.join("kv").join("bin"));
+        assert_eq!(env_kv_data_dir("myenv"), data_env.join("kv"));
         assert_eq!(
             env_lockfile("myenv"),
-            base.join("config/kvim-envs/myenv/lazy-lock.json")
+            base.join("config")
+                .join("kvim-envs")
+                .join("myenv")
+                .join("lazy-lock.json")
         );
         assert_eq!(
             kvim_lockfile("myenv"),
-            base.join("data/kvim-envs/myenv/lazy/KoalaVim/lazy-lock.json")
+            data_env
+                .join("lazy")
+                .join("KoalaVim")
+                .join("lazy-lock.json")
         );
 
         env::remove_var("XDG_CONFIG_HOME");
@@ -235,19 +259,45 @@ mod tests {
         env::remove_var("XDG_STATE_HOME");
         env::remove_var("XDG_CACHE_HOME");
 
-        let home = home_dir();
-        assert_eq!(
-            env_config_dir("myenv"),
-            home.join(".config/kvim-envs/myenv")
-        );
-        assert_eq!(
-            env_data_dir("myenv"),
-            home.join(".local/share/kvim-envs/myenv")
-        );
-        assert_eq!(
-            env_state_dir("myenv"),
-            home.join(".local/state/kvim-envs/myenv")
-        );
-        assert_eq!(env_cache_dir("myenv"), home.join(".cache/kvim-envs/myenv"));
+        if cfg!(windows) {
+            let local = env::var("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| home_dir().join("AppData").join("Local"));
+            assert_eq!(
+                env_config_dir("myenv"),
+                local.join("kvim-envs").join("myenv")
+            );
+            assert_eq!(
+                env_data_dir("myenv"),
+                local.join("kvim-envs").join("myenv-data")
+            );
+            assert_eq!(
+                env_state_dir("myenv"),
+                local.join("kvim-envs").join("myenv-data")
+            );
+            let cache_base = env::var("TEMP")
+                .or_else(|_| env::var("TMP"))
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| local.join("Temp"));
+            assert_eq!(
+                env_cache_dir("myenv"),
+                cache_base.join("kvim-envs").join("myenv")
+            );
+        } else {
+            let home = home_dir();
+            assert_eq!(
+                env_config_dir("myenv"),
+                home.join(".config/kvim-envs/myenv")
+            );
+            assert_eq!(
+                env_data_dir("myenv"),
+                home.join(".local/share/kvim-envs/myenv")
+            );
+            assert_eq!(
+                env_state_dir("myenv"),
+                home.join(".local/state/kvim-envs/myenv")
+            );
+            assert_eq!(env_cache_dir("myenv"), home.join(".cache/kvim-envs/myenv"));
+        }
     }
 }
