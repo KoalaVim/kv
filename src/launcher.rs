@@ -111,7 +111,11 @@ fn build_koala_env(
     if bin_dir.exists() {
         let current_path = std::env::var_os("PATH").unwrap_or_default();
         let mut new_path = OsString::from(&bin_dir);
-        let path_sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let path_sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
 
         let node_dir = env_node_dir(env_name);
         let node_bin = node_dir.join("bin");
@@ -238,9 +242,7 @@ fn raise_nofile_limit() {
             rlim_cur: 0,
             rlim_max: 0,
         };
-        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) == 0
-            && rlim.rlim_cur < rlim.rlim_max
-        {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) == 0 && rlim.rlim_cur < rlim.rlim_max {
             rlim.rlim_cur = rlim.rlim_max;
             libc::setrlimit(libc::RLIMIT_NOFILE, &rlim);
         }

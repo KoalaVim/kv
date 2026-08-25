@@ -109,6 +109,42 @@ fn check_fzf(env_name: &str) -> HealthResult {
     }
 }
 
+fn check_zf(env_name: &str) -> HealthResult {
+    let bin = find_binary("zf", env_name);
+    match Command::new(&bin).arg("--version").output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let trimmed = stdout.trim();
+            let version = trimmed
+                .split_whitespace()
+                .next()
+                .unwrap_or(trimmed)
+                .to_string();
+            HealthResult::Ok {
+                version,
+                detail: None,
+            }
+        }
+        Err(e) => HealthResult::Missing(e.to_string()),
+    }
+}
+
+fn check_fzy(env_name: &str) -> HealthResult {
+    let bin = find_binary("fzy", env_name);
+    match Command::new(&bin).arg("--version").output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let trimmed = stdout.trim();
+            let version = trimmed.strip_prefix("fzy ").unwrap_or(trimmed).to_string();
+            HealthResult::Ok {
+                version,
+                detail: None,
+            }
+        }
+        Err(e) => HealthResult::Missing(e.to_string()),
+    }
+}
+
 #[cfg(unix)]
 fn check_nerd_font(_env_name: &str) -> HealthResult {
     match Command::new("fc-list").output() {
@@ -231,6 +267,16 @@ static HEALTH_CHECKS: &[HealthCheck] = &[
         check: check_fzf,
     },
     HealthCheck {
+        name: "zf",
+        group: "dependencies",
+        check: check_zf,
+    },
+    HealthCheck {
+        name: "fzy",
+        group: "dependencies",
+        check: check_fzy,
+    },
+    HealthCheck {
         name: "node",
         group: "dependencies",
         check: check_node,
@@ -314,5 +360,7 @@ mod tests {
         assert!(names.contains(&"ripgrep (rg)"));
         assert!(names.contains(&"fd"));
         assert!(names.contains(&"fzf"));
+        assert!(names.contains(&"zf"));
+        assert!(names.contains(&"fzy"));
     }
 }

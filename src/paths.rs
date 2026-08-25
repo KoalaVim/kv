@@ -226,7 +226,10 @@ mod tests {
         env::set_var("XDG_CACHE_HOME", base.join("cache"));
 
         let data_env = env_data_dir("myenv");
-        assert_eq!(env_kvim_dir("myenv"), data_env.join("lazy").join("KoalaVim"));
+        assert_eq!(
+            env_kvim_dir("myenv"),
+            data_env.join("lazy").join("KoalaVim")
+        );
         assert_eq!(env_lazy_dir("myenv"), data_env.join("lazy"));
         assert_eq!(env_bin_dir("myenv"), data_env.join("kv").join("bin"));
         assert_eq!(env_kv_data_dir("myenv"), data_env.join("kv"));

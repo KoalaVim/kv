@@ -26,6 +26,12 @@ enum InstallMode {
     FullTree,
 }
 
+struct SystemPackageInfo {
+    brew: Option<&'static str>,
+    apt: Option<&'static str>,
+    pacman: Option<&'static str>,
+}
+
 struct Dependency {
     name: &'static str,
     github_repo: &'static str,
@@ -38,6 +44,8 @@ struct Dependency {
     /// When set, download directly from this base URL instead of using the GitHub Releases API.
     /// The final URL is `{direct_download_base}/{asset_pattern}`.
     direct_download_base: Option<&'static str>,
+    /// Fallback: install via system package manager when no GitHub release asset is available.
+    system_install: Option<&'static SystemPackageInfo>,
 }
 
 static DEPENDENCIES: &[Dependency] = &[
@@ -56,6 +64,7 @@ static DEPENDENCIES: &[Dependency] = &[
         strip_components: 2,
         install_mode: InstallMode::SingleBinary,
         direct_download_base: None,
+        system_install: None,
     },
     Dependency {
         name: "node",
@@ -76,6 +85,7 @@ static DEPENDENCIES: &[Dependency] = &[
         strip_components: 1,
         install_mode: InstallMode::FullTree,
         direct_download_base: Some("https://nodejs.org/dist/v22.16.0"),
+        system_install: None,
     },
     Dependency {
         name: "ripgrep",
@@ -92,6 +102,7 @@ static DEPENDENCIES: &[Dependency] = &[
         strip_components: 1,
         install_mode: InstallMode::SingleBinary,
         direct_download_base: None,
+        system_install: None,
     },
     Dependency {
         name: "fd",
@@ -108,6 +119,7 @@ static DEPENDENCIES: &[Dependency] = &[
         strip_components: 1,
         install_mode: InstallMode::SingleBinary,
         direct_download_base: None,
+        system_install: None,
     },
     Dependency {
         name: "fzf",
@@ -124,6 +136,7 @@ static DEPENDENCIES: &[Dependency] = &[
         strip_components: 0,
         install_mode: InstallMode::SingleBinary,
         direct_download_base: None,
+        system_install: None,
     },
     Dependency {
         name: "tree-sitter",
@@ -140,6 +153,38 @@ static DEPENDENCIES: &[Dependency] = &[
         strip_components: 0,
         install_mode: InstallMode::SingleBinary,
         direct_download_base: None,
+        system_install: None,
+    },
+    Dependency {
+        name: "zf",
+        github_repo: "natecraddock/zf",
+        version: "latest",
+        binary_name: "zf",
+        asset_patterns: &[
+            (Os::Linux, Arch::X86_64, "x86_64-linux.tar.xz"),
+            (Os::Linux, Arch::Aarch64, "aarch64-linux.tar.xz"),
+            (Os::MacOs, Arch::X86_64, "x86_64-macos.tar.xz"),
+            (Os::MacOs, Arch::Aarch64, "aarch64-macos.tar.xz"),
+        ],
+        strip_components: 0,
+        install_mode: InstallMode::SingleBinary,
+        direct_download_base: None,
+        system_install: None,
+    },
+    Dependency {
+        name: "fzy",
+        github_repo: "jhawthorn/fzy",
+        version: "latest",
+        binary_name: "fzy",
+        asset_patterns: &[],
+        strip_components: 0,
+        install_mode: InstallMode::SingleBinary,
+        direct_download_base: None,
+        system_install: Some(&SystemPackageInfo {
+            brew: Some("fzy"),
+            apt: Some("fzy"),
+            pacman: Some("fzy"),
+        }),
     },
 ];
 
@@ -310,6 +355,17 @@ fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
         if !status.success() {
             return Err("tar extraction failed".to_string());
         }
+    } else if archive_str.ends_with(".tar.xz") {
+        let status = Command::new("tar")
+            .args(["xf"])
+            .arg(archive)
+            .arg("-C")
+            .arg(dest)
+            .status()
+            .map_err(|e| format!("Failed to run tar: {}", e))?;
+        if !status.success() {
+            return Err("tar extraction failed".to_string());
+        }
     } else if archive_str.ends_with(".zip") {
         let status = if cfg!(target_os = "windows") {
             Command::new("tar")
@@ -396,6 +452,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 
 fn find_binary_recursive(dir: &Path, name: &str) -> Option<PathBuf> {
     let entries = fs::read_dir(dir).ok()?;
+    let mut prefix_match: Option<PathBuf> = None;
     for entry in entries.flatten() {
         let path = entry.path();
         let file_name = entry.file_name();
@@ -404,22 +461,27 @@ fn find_binary_recursive(dir: &Path, name: &str) -> Option<PathBuf> {
         if fname == name || fname.strip_suffix(".exe") == Some(name) {
             return Some(path);
         }
+        if path.is_file()
+            && prefix_match.is_none()
+            && fname.starts_with(name)
+            && fname.as_bytes().get(name.len()) == Some(&b'-')
+        {
+            prefix_match = Some(path);
+            continue;
+        }
         if path.is_dir() {
             if let Some(found) = find_binary_recursive(&path, name) {
                 return Some(found);
             }
         }
     }
-    None
+    prefix_match
 }
 
-fn install_binary(src: &Path, bin_dir: &Path) -> Result<(), String> {
+fn install_binary(src: &Path, bin_dir: &Path, target_name: &str) -> Result<(), String> {
     fs::create_dir_all(bin_dir).map_err(|e| format!("Failed to create bin dir: {}", e))?;
 
-    let dest = bin_dir.join(
-        src.file_name()
-            .ok_or_else(|| "Invalid binary path".to_string())?,
-    );
+    let dest = bin_dir.join(target_name);
     fs::copy(src, &dest).map_err(|e| format!("Failed to copy binary: {}", e))?;
 
     #[cfg(unix)]
@@ -444,8 +506,7 @@ fn install_sibling_dlls(src_dir: &Path, bin_dir: &Path) -> Result<(), String> {
             if let Some(ext) = path.extension() {
                 if ext.eq_ignore_ascii_case("dll") {
                     let dest = bin_dir.join(entry.file_name());
-                    fs::copy(&path, &dest)
-                        .map_err(|e| format!("Failed to copy DLL: {}", e))?;
+                    fs::copy(&path, &dest).map_err(|e| format!("Failed to copy DLL: {}", e))?;
                 }
             }
         }
@@ -510,18 +571,17 @@ pub fn cmd_install(env_name: &str, dry_run: bool, force_reinstall: bool) -> Resu
     for dep in DEPENDENCIES {
         println!("{}", "─".repeat(60).dimmed());
 
-        let pattern = match find_asset_pattern(dep, os, arch) {
-            Ok(p) => p,
-            Err(e) => {
-                println!(
-                    "  {} {} -- {}",
-                    "SKIP".yellow().bold(),
-                    dep.name,
-                    e.dimmed()
-                );
-                continue;
-            }
-        };
+        let pattern = find_asset_pattern(dep, os, arch).ok();
+
+        if pattern.is_none() && dep.system_install.is_none() {
+            println!(
+                "  {} {} -- {}",
+                "SKIP".yellow().bold(),
+                dep.name,
+                format!("No binary available for {:?}/{:?}", os, arch).dimmed()
+            );
+            continue;
+        }
 
         println!(
             "  {} {} ({})",
@@ -530,36 +590,64 @@ pub fn cmd_install(env_name: &str, dry_run: bool, force_reinstall: bool) -> Resu
             dep.github_repo.dimmed()
         );
 
-        if dry_run {
-            println!("      version: {}", dep.version);
-            println!("      asset:   {}", pattern);
-            println!("      dest:    {}", bin_dir.display());
-            continue;
-        }
+        if let Some(pattern) = pattern {
+            if dry_run {
+                println!("      version: {}", dep.version);
+                println!("      asset:   {}", pattern);
+                println!("      dest:    {}", bin_dir.display());
+                continue;
+            }
 
-        let resolved = resolve_dep_version(dep, pattern)?;
+            let resolved = resolve_dep_version(dep, pattern)?;
 
-        if !force_reinstall {
-            if let Some(installed) = manifest.installed.get(dep.name) {
-                if installed.version == resolved.tag {
-                    println!(
-                        "  {} {} ({})",
-                        "OK".green().bold(),
-                        dep.name,
-                        "up to date".dimmed()
-                    );
-                    continue;
+            if !force_reinstall {
+                if let Some(installed) = manifest.installed.get(dep.name) {
+                    if installed.version == resolved.tag {
+                        println!(
+                            "  {} {} ({})",
+                            "OK".green().bold(),
+                            dep.name,
+                            "up to date".dimmed()
+                        );
+                        continue;
+                    }
                 }
             }
-        }
 
-        match install_single_dep(dep, &resolved, &bin_dir, &tmp_dir, &mut manifest, env_name) {
-            Ok(()) => {
-                println!("  {} {}", "OK".green().bold(), dep.name);
+            match install_single_dep(dep, &resolved, &bin_dir, &tmp_dir, &mut manifest, env_name) {
+                Ok(()) => {
+                    println!("  {} {}", "OK".green().bold(), dep.name);
+                }
+                Err(e) => {
+                    eprintln!("  {} {} -- {}", "FAIL".red().bold(), dep.name, e);
+                    errors.push(format!("{}: {}", dep.name, e));
+                }
             }
-            Err(e) => {
-                eprintln!("  {} {} -- {}", "FAIL".red().bold(), dep.name, e);
-                errors.push(format!("{}: {}", dep.name, e));
+        } else if let Some(pkg_info) = dep.system_install {
+            if !force_reinstall && bin_dir.join(dep.binary_name).exists() {
+                println!(
+                    "  {} {} ({})",
+                    "OK".green().bold(),
+                    dep.name,
+                    "up to date".dimmed()
+                );
+                continue;
+            }
+
+            if dry_run {
+                println!("      install via: system package manager");
+                println!("      dest:        {}", bin_dir.display());
+                continue;
+            }
+
+            match install_via_system(dep, pkg_info, os, &bin_dir) {
+                Ok(()) => {
+                    println!("  {} {}", "OK".green().bold(), dep.name);
+                }
+                Err(e) => {
+                    eprintln!("  {} {} -- {}", "FAIL".red().bold(), dep.name, e);
+                    errors.push(format!("{}: {}", dep.name, e));
+                }
             }
         }
     }
@@ -584,6 +672,119 @@ pub fn cmd_install(env_name: &str, dry_run: bool, force_reinstall: bool) -> Resu
             errors.join("\n  ")
         ))
     }
+}
+
+fn install_via_system(
+    dep: &Dependency,
+    pkg_info: &SystemPackageInfo,
+    os: Os,
+    bin_dir: &Path,
+) -> Result<(), String> {
+    let system_binary = find_system_binary(dep.binary_name);
+
+    if system_binary.is_none() {
+        run_pkg_install(pkg_info, os)?;
+    }
+
+    let src = find_system_binary(dep.binary_name).ok_or_else(|| {
+        format!(
+            "'{}' not found on system after install attempt",
+            dep.binary_name
+        )
+    })?;
+
+    println!(
+        "      copying {} to {}",
+        src.display().to_string().dimmed(),
+        bin_dir.display().to_string().dimmed()
+    );
+    install_binary(&src, bin_dir, dep.binary_name)?;
+
+    Ok(())
+}
+
+fn find_system_binary(name: &str) -> Option<PathBuf> {
+    Command::new("which")
+        .arg(name)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim().to_string()))
+        .filter(|p| p.exists())
+}
+
+fn run_pkg_install(pkg_info: &SystemPackageInfo, os: Os) -> Result<(), String> {
+    match os {
+        Os::MacOs => {
+            let pkg = pkg_info
+                .brew
+                .ok_or_else(|| "No Homebrew package defined".to_string())?;
+            println!(
+                "      installing via: {}",
+                format!("brew install {}", pkg).dimmed()
+            );
+            let status = Command::new("brew")
+                .args(["install", pkg])
+                .status()
+                .map_err(|e| format!("Failed to run brew: {}", e))?;
+            if !status.success() {
+                return Err(format!("brew install {} failed", pkg));
+            }
+        }
+        Os::Linux => {
+            if let Some(pkg) = pkg_info.apt {
+                if Command::new("apt-get").arg("--version").output().is_ok() {
+                    println!(
+                        "      installing via: {}",
+                        format!("apt-get install {}", pkg).dimmed()
+                    );
+                    let status = Command::new("sudo")
+                        .args(["apt-get", "install", "-y", pkg])
+                        .status()
+                        .map_err(|e| format!("Failed to run apt-get: {}", e))?;
+                    if !status.success() {
+                        return Err(format!("apt-get install {} failed", pkg));
+                    }
+                    return Ok(());
+                }
+            }
+            if let Some(pkg) = pkg_info.pacman {
+                if Command::new("pacman").arg("--version").output().is_ok() {
+                    println!(
+                        "      installing via: {}",
+                        format!("pacman -S {}", pkg).dimmed()
+                    );
+                    let status = Command::new("sudo")
+                        .args(["pacman", "-S", "--noconfirm", pkg])
+                        .status()
+                        .map_err(|e| format!("Failed to run pacman: {}", e))?;
+                    if !status.success() {
+                        return Err(format!("pacman -S {} failed", pkg));
+                    }
+                    return Ok(());
+                }
+            }
+            return Err("No supported package manager found (tried apt-get, pacman)".to_string());
+        }
+        Os::Windows => {
+            if let Some(pkg) = pkg_info.pacman {
+                println!(
+                    "      installing via: {}",
+                    format!("pacman -S {}", pkg).dimmed()
+                );
+                let status = Command::new("pacman")
+                    .args(["-S", "--noconfirm", pkg])
+                    .status()
+                    .map_err(|e| format!("Failed to run pacman: {}", e))?;
+                if !status.success() {
+                    return Err(format!("pacman -S {} failed", pkg));
+                }
+            } else {
+                return Err("No package manager available for Windows".to_string());
+            }
+        }
+    }
+    Ok(())
 }
 
 struct ResolvedDep {
@@ -634,7 +835,7 @@ fn install_single_dep(
                 dep.binary_name.bold(),
                 bin_dir.display().to_string().dimmed()
             );
-            install_binary(&binary_path, bin_dir)?;
+            install_binary(&binary_path, bin_dir, dep.binary_name)?;
             if cfg!(target_os = "windows") {
                 if let Some(bin_parent) = binary_path.parent() {
                     install_sibling_dlls(bin_parent, bin_dir)?;
@@ -766,8 +967,7 @@ fn find_tree_root(extract_dir: &Path, binary_name: &str) -> Result<PathBuf, Stri
 }
 
 fn has_binary_in(dir: &Path, binary_name: &str) -> bool {
-    dir.join(binary_name).exists()
-        || dir.join(format!("{}.exe", binary_name)).exists()
+    dir.join(binary_name).exists() || dir.join(format!("{}.exe", binary_name)).exists()
 }
 
 #[cfg(test)]
@@ -805,6 +1005,7 @@ mod tests {
             strip_components: 0,
             install_mode: InstallMode::SingleBinary,
             direct_download_base: None,
+            system_install: None,
         };
         let pattern = find_asset_pattern(&dep, Os::Linux, Arch::X86_64);
         assert!(pattern.is_err());
@@ -836,7 +1037,7 @@ mod tests {
         fs::write(&src, "binary content").unwrap();
 
         let bin_dir = tmp.path().join("bin");
-        install_binary(&src, &bin_dir).unwrap();
+        install_binary(&src, &bin_dir, "mybinary").unwrap();
 
         assert!(bin_dir.join("mybinary").exists());
     }
@@ -875,5 +1076,7 @@ mod tests {
         assert!(names.contains(&"ripgrep"));
         assert!(names.contains(&"fd"));
         assert!(names.contains(&"fzf"));
+        assert!(names.contains(&"zf"));
+        assert!(names.contains(&"fzy"));
     }
 }
