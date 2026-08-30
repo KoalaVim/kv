@@ -1031,6 +1031,25 @@ mod tests {
     }
 
     #[test]
+    fn test_find_binary_prefix_match() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::write(tmp.path().join("zf-0.10.2-aarch64-macos"), "fake binary").unwrap();
+
+        let found = find_binary_in_dir(tmp.path(), "zf");
+        assert!(
+            found.is_ok(),
+            "Should find zf via prefix match: {:?}",
+            found
+        );
+        let path = found.unwrap();
+        assert!(
+            path.ends_with("zf-0.10.2-aarch64-macos"),
+            "Found wrong path: {:?}",
+            path
+        );
+    }
+
+    #[test]
     fn test_install_binary_to_dir() {
         let tmp = tempfile::TempDir::new().unwrap();
         let src = tmp.path().join("mybinary");
