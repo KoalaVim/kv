@@ -113,15 +113,11 @@ fn check_zf(env_name: &str) -> HealthResult {
     let bin = find_binary("zf", env_name);
     match Command::new(&bin).arg("--version").output() {
         Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let trimmed = stdout.trim();
-            let version = trimmed
-                .split_whitespace()
-                .next()
-                .unwrap_or(trimmed)
-                .to_string();
+            // zf prints "zf <version> Nathan Craddock" on stderr.
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let version = stderr.split_whitespace().nth(1).unwrap_or("unknown");
             HealthResult::Ok {
-                version,
+                version: version.to_string(),
                 detail: None,
             }
         }
@@ -133,9 +129,14 @@ fn check_fzy(env_name: &str) -> HealthResult {
     let bin = find_binary("fzy", env_name);
     match Command::new(&bin).arg("--version").output() {
         Ok(output) => {
+            // fzy prints "<argv[0]> <version> (c) ... John Hawthorn"; argv[0] is
+            // the path kv invoked it with, not a fixed "fzy " prefix.
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let trimmed = stdout.trim();
-            let version = trimmed.strip_prefix("fzy ").unwrap_or(trimmed).to_string();
+            let version = stdout
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("unknown")
+                .to_string();
             HealthResult::Ok {
                 version,
                 detail: None,
