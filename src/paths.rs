@@ -72,6 +72,11 @@ pub fn env_config_dir(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// The env conf layer: `<env_config_dir>/.kvim.conf`.
+pub fn env_kvim_conf(name: &str) -> PathBuf {
+    env_config_dir(name).join(".kvim.conf")
+}
+
 pub fn env_data_dir(name: &str) -> PathBuf {
     let base = nvim_base_dir("XDG_DATA_HOME", ".local/share");
     // Neovim unconditionally appends "-data" to the appname on Windows
@@ -231,6 +236,13 @@ mod tests {
             data_env.join("lazy").join("KoalaVim")
         );
         assert_eq!(env_lazy_dir("myenv"), data_env.join("lazy"));
+        assert_eq!(
+            env_kvim_conf("myenv"),
+            base.join("config")
+                .join("kvim-envs")
+                .join("myenv")
+                .join(".kvim.conf")
+        );
         assert_eq!(env_bin_dir("myenv"), data_env.join("kv").join("bin"));
         assert_eq!(env_kv_data_dir("myenv"), data_env.join("kv"));
         assert_eq!(
