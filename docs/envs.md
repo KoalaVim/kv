@@ -155,6 +155,26 @@ Example output:
 2 env(s) found.
 ```
 
+## Per-Env Config (`.kvim.conf`)
+
+Each env can have its own KoalaVim config layer at `<env config dir>/.kvim.conf` (e.g. `~/.config/kvim-envs/<name>/.kvim.conf`). KoalaVim merges layers in this order, later ones overriding earlier ones:
+
+1. KoalaVim defaults
+2. user conf (`~/.kvim.conf`, or the path given with `kv -c`)
+3. env conf (`<env config dir>/.kvim.conf`)
+4. repo conf (`<git toplevel>/.kvim.conf`)
+
+`kv` always passes the env conf path in `KOALA_ENV_KVIM_CONF`, whether or not the file exists, and never creates it on a normal launch. `-c/--cfg` only affects the user layer. Because the file lives in the env config dir, `kv env fork`, `rename` and `delete` copy, move and remove it with the env.
+
+```bash
+kv env config              # edit the current env's .kvim.conf in KoalaVim (created with {} if missing)
+kv env config work         # same, for env "work"
+kv env config work --path  # only print the path (nothing is created or opened)
+$EDITOR "$(kv env config --path)"
+```
+
+With no name, the env is resolved like a launch: `--env`, then `KV_ENV`, then `main`. An unknown env is an error.
+
 ## Renaming Envs
 
 ```bash

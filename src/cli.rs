@@ -177,6 +177,14 @@ pub enum EnvAction {
         /// Name of the env
         name: String,
     },
+    /// Edit the env's .kvim.conf
+    Config {
+        /// Name of the env (default: resolved like a launch)
+        name: Option<String>,
+        /// Only print the env conf path
+        #[arg(long)]
+        path: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -552,5 +560,47 @@ mod tests {
         let cli = Cli::try_parse_from(["kv", "--env", "myenv", "health"]).unwrap();
         assert_eq!(cli.env.as_deref(), Some("myenv"));
         assert!(matches!(cli.command, Some(Commands::Health)));
+    }
+
+    #[test]
+    fn test_cli_env_config_default() {
+        let cli = Cli::try_parse_from(["kv", "env", "config"]).unwrap();
+        match cli.command {
+            Some(Commands::Env {
+                action: EnvAction::Config { ref name, path },
+            }) => {
+                assert!(name.is_none());
+                assert!(!path);
+            }
+            _ => panic!("Expected Env Config subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_env_config_with_name() {
+        let cli = Cli::try_parse_from(["kv", "env", "config", "work"]).unwrap();
+        match cli.command {
+            Some(Commands::Env {
+                action: EnvAction::Config { ref name, path },
+            }) => {
+                assert_eq!(name.as_deref(), Some("work"));
+                assert!(!path);
+            }
+            _ => panic!("Expected Env Config subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_cli_env_config_with_name_and_path() {
+        let cli = Cli::try_parse_from(["kv", "env", "config", "work", "--path"]).unwrap();
+        match cli.command {
+            Some(Commands::Env {
+                action: EnvAction::Config { ref name, path },
+            }) => {
+                assert_eq!(name.as_deref(), Some("work"));
+                assert!(path);
+            }
+            _ => panic!("Expected Env Config subcommand"),
+        }
     }
 }

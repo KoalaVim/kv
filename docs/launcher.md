@@ -58,6 +58,10 @@ kv --nvim-bin-path /path/to/nvim  # override nvim binary
 kv -v                             # verbose output (prints env vars, paths)
 ```
 
+## Config Layers
+
+KoalaVim merges `.kvim.conf` layers as defaults < user < env < repo. The env layer is `<env config dir>/.kvim.conf`, passed via `KOALA_ENV_KVIM_CONF` and edited with `kv env config [NAME] [--path]` (see [envs.md](envs.md)).
+
 ## Restart Loop
 
 KoalaVim can request a restart by creating a `restart_kvim` file in the env's data directory. When `kv` detects this file after nvim exits, it removes the file and relaunches nvim with `KOALA_RESTART=1` set.
@@ -67,7 +71,8 @@ KoalaVim can request a restart by creating a `restart_kvim` file in the env's da
 | Variable | Description |
 |---|---|
 | `NVIM_APPNAME` | Set to `kvim-envs/<env>` for env isolation |
-| `KOALA_KVIM_CONF` | Path to kvim.conf |
+| `KOALA_KVIM_CONF` | Path to the user kvim.conf (`-c` affects only this layer) |
+| `KOALA_ENV_KVIM_CONF` | Path to the env conf, `<env config dir>/.kvim.conf` (always set; the file may not exist) |
 | `KOALA_DEBUG_OUT` | Debug output file (when `-d` is used) |
 | `KOALA_NO_NOICE` | Set to `1` when `-n` is used |
 | `KOALA_NO_SESSION` | Set to `1` in mode launches |

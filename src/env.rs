@@ -148,6 +148,28 @@ pub fn cmd_env_init(name: &str) -> Result<PathBuf, String> {
     }
 }
 
+/// Returns the env conf path for an existing env. Does not create anything.
+pub fn resolve_env_kvim_conf(name: &str) -> Result<PathBuf, String> {
+    validate_env_name(name).map_err(|e| format!("Invalid env name: {}", e))?;
+    if !env_config_dir(name).exists() {
+        return Err(format!(
+            "Env '{}' does not exist. Create it with: kv env create {}",
+            name, name
+        ));
+    }
+    Ok(env_kvim_conf(name))
+}
+
+/// Ensures the env conf exists (creating it with `{}` if missing) and returns its path.
+pub fn ensure_env_kvim_conf(name: &str) -> Result<PathBuf, String> {
+    let path = resolve_env_kvim_conf(name)?;
+    if !path.exists() {
+        fs::write(&path, "{}")
+            .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+    }
+    Ok(path)
+}
+
 pub fn cmd_env_fork(source: &str, name: &str) -> Result<PathBuf, String> {
     validate_env_name(source).map_err(|e| format!("Invalid source env name: {}", e))?;
     validate_env_name(name).map_err(|e| format!("Invalid env name: {}", e))?;
@@ -650,5 +672,63 @@ mod tests {
         let result = cmd_env_fork("fork-a", "fork-b");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_ensure_env_kvim_conf_creates_empty_object() {
+        let _tmp = with_temp_xdg();
+        cmd_env_create("conf-new", None, None).unwrap();
+
+        let path = ensure_env_kvim_conf("conf-new").unwrap();
+        assert_eq!(path, env_kvim_conf("conf-new"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{}");
+    }
+
+    #[test]
+    #[serial]
+    fn test_ensure_env_kvim_conf_keeps_existing_content() {
+        let _tmp = with_temp_xdg();
+        cmd_env_create("conf-keep", None, None).unwrap();
+        let path = env_kvim_conf("conf-keep");
+        fs::write(&path, "{\"ai\":{}}").unwrap();
+
+        assert_eq!(ensure_env_kvim_conf("conf-keep").unwrap(), path);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{\"ai\":{}}");
+    }
+
+    #[test]
+    #[serial]
+    fn test_ensure_env_kvim_conf_unknown_env() {
+        let _tmp = with_temp_xdg();
+
+        let err = ensure_env_kvim_conf("nope").unwrap_err();
+        assert!(err.contains("does not exist"));
+        assert!(!env_config_dir("nope").exists());
+    }
+
+    #[test]
+    #[serial]
+    fn test_resolve_env_kvim_conf_does_not_create_file() {
+        let _tmp = with_temp_xdg();
+        cmd_env_create("conf-path", None, None).unwrap();
+
+        let path = resolve_env_kvim_conf("conf-path").unwrap();
+        assert!(!path.exists());
+        assert!(resolve_env_kvim_conf("nope").is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn test_env_fork_copies_env_kvim_conf() {
+        let _tmp = with_temp_xdg();
+        cmd_env_create("conf-src", None, None).unwrap();
+        fs::write(env_kvim_conf("conf-src"), "{\"a\":1}").unwrap();
+
+        cmd_env_fork("conf-src", "conf-dst").unwrap();
+        assert_eq!(
+            fs::read_to_string(env_kvim_conf("conf-dst")).unwrap(),
+            "{\"a\":1}"
+        );
     }
 }

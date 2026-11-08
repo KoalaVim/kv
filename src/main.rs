@@ -23,6 +23,14 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
+    if matches!(
+        &cli.command,
+        Some(Commands::Env {
+            action: EnvAction::Config { .. }
+        })
+    ) {
+        return handle_env_config(cli);
+    }
     if let Some(command) = &cli.command {
         return handle_subcommand(&cli, command);
     }
@@ -96,8 +104,36 @@ fn handle_env_action(action: &EnvAction) -> Result<(), String> {
             let kvim_dir = paths::env_kvim_dir(name);
             println!("{}", kvim_dir.display());
         }
+        // Handled in `run` (needs ownership of `Cli` to launch nvim).
+        EnvAction::Config { .. } => {}
     }
     Ok(())
+}
+
+/// `kv env config [NAME] [--path]`: print the env conf path, or open it in
+/// KoalaVim running in that env (creating it with `{}` if missing).
+fn handle_env_config(mut cli: Cli) -> Result<(), String> {
+    let (name, path_only) = match cli.command.take() {
+        Some(Commands::Env {
+            action: EnvAction::Config { name, path },
+        }) => (name, path),
+        _ => return Ok(()),
+    };
+    let env_name = match name {
+        Some(n) => n,
+        None => launcher::resolve_env_name_unchecked(&cli)?,
+    };
+
+    if path_only {
+        let path = env::resolve_env_kvim_conf(&env_name)?;
+        println!("{}", path.display());
+        return Ok(());
+    }
+
+    let path = env::ensure_env_kvim_conf(&env_name)?;
+    cli.env = Some(env_name);
+    cli.nvim_args = vec![path.into_os_string()];
+    launcher::launch_nvim(cli)
 }
 
 fn handle_lockfile_action(action: &LockfileAction, env_name: &str) -> Result<(), String> {

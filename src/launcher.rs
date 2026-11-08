@@ -1,8 +1,8 @@
 use crate::cli::Cli;
 use crate::env;
 use crate::paths::{
-    env_all_dirs, env_appname, env_bin_dir, env_config_dir, env_data_dir, env_node_dir,
-    env_nvim_runtime_dir,
+    env_all_dirs, env_appname, env_bin_dir, env_config_dir, env_data_dir, env_kvim_conf,
+    env_node_dir, env_nvim_runtime_dir,
 };
 use chrono::Local;
 use std::ffi::OsString;
@@ -105,6 +105,10 @@ fn build_koala_env(
         ("NVIM_APPNAME".into(), appname.into()),
         ("KOALA_KVIM_CONF".into(), cli.cfg.as_os_str().into()),
         ("KOALA_ENV".into(), env_name.into()),
+        (
+            "KOALA_ENV_KVIM_CONF".into(),
+            env_kvim_conf(env_name).into_os_string(),
+        ),
     ];
 
     let bin_dir = env_bin_dir(env_name);
@@ -267,6 +271,7 @@ pub fn tilde_shorten(path: &std::path::Path) -> String {
 mod tests {
     use super::*;
     use clap::Parser;
+    use serial_test::serial;
 
     #[test]
     fn test_join_args_separates_with_space() {
@@ -327,5 +332,36 @@ mod tests {
         std::env::remove_var("KV_ENV");
         let result = resolve_env_name_unchecked(&cli).unwrap();
         assert_eq!(result, "main");
+    }
+
+    fn env_value<'a>(env: &'a [(OsString, OsString)], key: &str) -> Option<&'a OsString> {
+        env.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+
+    #[test]
+    #[serial]
+    fn test_build_koala_env_sets_env_kvim_conf() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", tmp.path().join("cfg"));
+        std::env::set_var("XDG_DATA_HOME", tmp.path().join("data"));
+
+        let cli = Cli::try_parse_from(["kv", "-c", "/tmp/my.conf", "--env", "work"]).unwrap();
+        let env = build_koala_env(&cli, "work", "kvim-envs/work", None).unwrap();
+
+        let expected = tmp
+            .path()
+            .join("cfg")
+            .join("kvim-envs")
+            .join("work")
+            .join(".kvim.conf");
+        assert_eq!(
+            env_value(&env, "KOALA_ENV_KVIM_CONF"),
+            Some(&expected.clone().into_os_string())
+        );
+        assert_eq!(
+            env_value(&env, "KOALA_KVIM_CONF"),
+            Some(&OsString::from("/tmp/my.conf"))
+        );
+        assert!(!expected.exists());
     }
 }
