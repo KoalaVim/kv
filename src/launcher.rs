@@ -121,19 +121,22 @@ fn build_koala_env(
             ":"
         };
 
-        let node_dir = env_node_dir(env_name);
-        let node_bin = node_dir.join("bin");
-        if node_bin.exists() {
-            new_path.push(path_sep);
-            new_path.push(&node_bin);
-        } else if node_dir.exists() {
-            new_path.push(path_sep);
-            new_path.push(&node_dir);
-        }
-
         if !current_path.is_empty() {
             new_path.push(path_sep);
             new_path.push(&current_path);
+        }
+
+        // Bundled Node goes last: a fallback for mason, so the user's own Node wins.
+        let node_dir = env_node_dir(env_name);
+        let node_bin = node_dir.join("bin");
+        let node_path = if node_bin.exists() {
+            node_bin
+        } else {
+            node_dir
+        };
+        if node_path.exists() {
+            new_path.push(path_sep);
+            new_path.push(&node_path);
         }
         koala_env.push(("PATH".into(), new_path));
     }
@@ -309,6 +312,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_resolve_env_name_unchecked_cli_flag_wins() {
         let cli = Cli::try_parse_from(["kv", "--env", "from-flag"]).unwrap();
         std::env::set_var("KV_ENV", "from-envvar");
@@ -318,6 +322,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_resolve_env_name_unchecked_reads_kv_env() {
         let cli = Cli::try_parse_from(["kv"]).unwrap();
         std::env::set_var("KV_ENV", "from-envvar");
@@ -327,6 +332,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_resolve_env_name_unchecked_defaults_to_main() {
         let cli = Cli::try_parse_from(["kv"]).unwrap();
         std::env::remove_var("KV_ENV");
@@ -363,5 +369,38 @@ mod tests {
             Some(&OsString::from("/tmp/my.conf"))
         );
         assert!(!expected.exists());
+    }
+
+    #[test]
+    #[serial]
+    fn test_build_koala_env_puts_bundled_node_last_on_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", tmp.path().join("cfg"));
+        std::env::set_var("XDG_DATA_HOME", tmp.path().join("data"));
+        let bin_dir = env_bin_dir("work");
+        let node_bin = env_node_dir("work").join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::create_dir_all(&node_bin).unwrap();
+
+        let sep = if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        };
+        let original_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", format!("/u/a{sep}/u/b"));
+
+        let cli = Cli::try_parse_from(["kv", "--env", "work"]).unwrap();
+        let env = build_koala_env(&cli, "work", "kvim-envs/work", None).unwrap();
+
+        match original_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        let mut expected = OsString::from(&bin_dir);
+        expected.push(format!("{sep}/u/a{sep}/u/b{sep}"));
+        expected.push(&node_bin);
+        assert_eq!(env_value(&env, "PATH"), Some(&expected));
     }
 }
