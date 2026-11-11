@@ -38,7 +38,7 @@ kv --env experiment       # launch using the "experiment" env
 
 If no `--env` is specified, `kv` uses the `main` env. If `main` doesn't exist yet, `kv` prints setup instructions and exits.
 
-Per-env binaries installed via `kv install` are automatically prepended to `PATH` when launching, so nvim and its subprocesses use the env's tools.
+Per-env binaries installed via `kv install` are automatically prepended to `PATH` when launching, so nvim and its subprocesses use the env's tools. The bundled Node is the exception: it is appended after your `PATH`, so a Node from your version manager wins and the bundled one is only a fallback.
 
 ## Debug
 
